@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
-import { CreateUserDto } from './dto';
+import { CreateUserDto, LoginUserDto } from './dto';
 
 @Controller('auth')
 export class AuthController {
@@ -20,10 +20,10 @@ export class AuthController {
     return this.authService.create(createUserDto);
   }
 
-  // @Post('login')
-  // loginUser(@Body() loginUserDto: LoginUserDto) {
-  //   return this.authService.login(loginUserDto);
-  // }
+  @Post('login')
+  loginUser(@Body() loginUserDto: LoginUserDto) {
+    return this.authService.login(loginUserDto);
+  }
 
   // @Get('check-status')
   // // @Auth()

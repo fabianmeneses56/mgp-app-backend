@@ -1,8 +1,10 @@
+import { Category } from 'src/categories/entities/category.entity';
 import {
   BeforeInsert,
   BeforeUpdate,
   Column,
   Entity,
+  OneToMany,
   // OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -37,8 +39,8 @@ export class User {
   })
   roles: string[];
 
-  // @OneToMany(() => Product, (product) => product.user)
-  // product: Product;
+  @OneToMany(() => Category, (category) => category.user)
+  category: Category;
 
   @BeforeInsert()
   checkFieldsBeforeInsert() {

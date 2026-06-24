@@ -6,72 +6,140 @@ import {
 } from '@nestjs/common';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
-import { Exercise } from './entities/exercise.entity';
+import { Exercise, WeightUnit } from './entities/exercise.entity';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
+import { User } from 'src/auth/entities/user.entity';
+import { Category } from 'src/categories/entities/category.entity';
+import { unlink } from 'fs/promises';
+import { join } from 'path';
 
 @Injectable()
 export class ExercisesService {
   constructor(
     @InjectRepository(Exercise)
     private readonly exerciseRepository: Repository<Exercise>,
+
+    @InjectRepository(Category)
+    private readonly categoryRepository: Repository<Category>,
   ) {}
 
-  async create(createExerciseDto: CreateExerciseDto) {
-    console.log(createExerciseDto);
-
+  async create(
+    createExerciseDto: CreateExerciseDto,
+    user: User,
+    image?: { filename: string },
+  ) {
     try {
+      const category = await this.getUserCategory(createExerciseDto.category, user);
+
       const exercise = this.exerciseRepository.create({
-        weightGrams: createExerciseDto.weight,
-        ...createExerciseDto,
+        name: createExerciseDto.name,
+        weightGrams: this.convertWeightToGrams(
+          createExerciseDto.weight,
+          createExerciseDto.weightUnit,
+        ),
+        weightUnit: createExerciseDto.weightUnit,
+        imageUrl: image ? `/uploads/exercises/${image.filename}` : null,
+        category,
       });
 
       await this.exerciseRepository.save(exercise);
 
-      return { ...createExerciseDto };
+      return this.findOne(exercise.id, user);
     } catch (error) {
+      await this.deleteImageIfExists(image?.filename);
       this.handleDBExceptions(error);
     }
-
-    return 'This action adds a new exercise';
   }
 
   findAll() {
     return `This action returns all exercises`;
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: User) {
     if (!isUUID(id))
       throw new NotFoundException(`Exercise with ${id} not found`);
 
-    const exercise = await this.exerciseRepository.findOneBy({ id });
+    const exercise = await this.exerciseRepository.findOne({
+      where: {
+        id,
+        ...(user ? { category: { user: { id: user.id } } } : {}),
+      },
+      relations: {
+        category: true,
+      },
+    });
 
     if (!exercise) throw new NotFoundException(`Exercise with ${id} not found`);
 
     return exercise;
   }
 
-  async update(id: string, updateExerciseDto: UpdateExerciseDto) {
-    console.log(updateExerciseDto);
+  async update(
+    id: string,
+    updateExerciseDto: UpdateExerciseDto,
+    user: User,
+    image?: { filename: string },
+  ) {
+    if (
+      updateExerciseDto.weightUnit !== undefined &&
+      updateExerciseDto.weight === undefined
+    ) {
+      throw new BadRequestException(
+        'weight must be provided when weightUnit is updated',
+      );
+    }
+
+    const currentExercise = await this.findOne(id, user);
+    let category = currentExercise.category;
+
+    if (updateExerciseDto.category) {
+      category = await this.getUserCategory(updateExerciseDto.category, user);
+    }
 
     const exercise = await this.exerciseRepository.preload({
       id,
-      ...updateExerciseDto,
+      name: updateExerciseDto.name ?? currentExercise.name,
+      weightGrams:
+        updateExerciseDto.weight !== undefined
+          ? this.convertWeightToGrams(
+              updateExerciseDto.weight,
+              updateExerciseDto.weightUnit ?? currentExercise.weightUnit,
+            )
+          : currentExercise.weightGrams,
+      weightUnit: updateExerciseDto.weightUnit ?? currentExercise.weightUnit,
+      imageUrl: image
+        ? `/uploads/exercises/${image.filename}`
+        : currentExercise.imageUrl,
+      category,
     });
 
     if (!exercise)
       throw new NotFoundException(`Exercise with id: ${id} not found`);
 
-    await this.exerciseRepository.save(exercise);
-    return this.findOne(id);
+    try {
+      await this.exerciseRepository.save(exercise);
+
+      if (image && currentExercise.imageUrl) {
+        await this.deleteImageIfExists(this.extractFilename(currentExercise.imageUrl));
+      }
+
+      return this.findOne(id, user);
+    } catch (error) {
+      await this.deleteImageIfExists(image?.filename);
+      this.handleDBExceptions(error);
+    }
   }
 
-  async remove(id: string) {
-    const exercise = await this.findOne(id);
+  async remove(id: string, user: User) {
+    const exercise = await this.findOne(id, user);
 
     await this.exerciseRepository.remove(exercise);
-    // return `This action removes a #${id} exercise`;
+
+    if (exercise.imageUrl) {
+      await this.deleteImageIfExists(this.extractFilename(exercise.imageUrl));
+    }
   }
 
   private handleDBExceptions(error: any) {
@@ -82,5 +150,49 @@ export class ExercisesService {
     throw new InternalServerErrorException(
       'Unexpected error, check server logs',
     );
+  }
+
+  private convertWeightToGrams(weight: number, unit: WeightUnit) {
+    switch (unit) {
+      case WeightUnit.GRAM:
+        return Math.round(weight);
+      case WeightUnit.KILOGRAM:
+        return Math.round(weight * 1000);
+      case WeightUnit.POUND:
+        return Math.round(weight * 453.592);
+      default:
+        return Math.round(weight);
+    }
+  }
+
+  private async getUserCategory(categoryId: string, user: User) {
+    const category = await this.categoryRepository.findOne({
+      where: {
+        id: categoryId,
+        user: { id: user.id },
+      },
+    });
+
+    if (!category) {
+      throw new NotFoundException(
+        `Category with id: ${categoryId} not found for this user`,
+      );
+    }
+
+    return category;
+  }
+
+  private extractFilename(imageUrl: string) {
+    return imageUrl.split('/').pop() ?? '';
+  }
+
+  private async deleteImageIfExists(filename?: string) {
+    if (!filename) return;
+
+    try {
+      await unlink(join(process.cwd(), 'static', 'uploads', 'exercises', filename));
+    } catch {
+      return;
+    }
   }
 }

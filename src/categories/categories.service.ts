@@ -27,7 +27,7 @@ export class CategoriesService {
       });
 
       await this.categoryRepository.save(category);
-      return { ...createCategoryDto };
+      return { ...category };
     } catch (error) {
       this.handleDBExceptions(error);
     }

@@ -13,12 +13,12 @@ import {
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column('text', {
     unique: true,
   })
-  email: string;
+  email!: string;
 
   @Column('text', {
     select: false, // cuando usamos find ya no aparece en la data que retorna
@@ -26,21 +26,21 @@ export class User {
   password?: string;
 
   @Column('text')
-  fullName: string;
+  fullName!: string;
 
   @Column('bool', {
     default: true,
   })
-  isActive: boolean;
+  isActive!: boolean;
 
   @Column('text', {
     array: true,
     default: ['user'],
   })
-  roles: string[];
+  roles!: string[];
 
   @OneToMany(() => Category, (category) => category.user)
-  category: Category;
+  category!: Category;
 
   @BeforeInsert()
   checkFieldsBeforeInsert() {

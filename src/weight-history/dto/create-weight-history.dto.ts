@@ -11,15 +11,15 @@ import { WeightUnit } from 'src/exercises/enums/weight-unit.enum';
 export class CreateWeightHistoryDto {
   @IsNumber()
   @Min(0.001)
-  weight: number;
+  weight!: number;
 
   @IsEnum(WeightUnit)
-  weightUnit: WeightUnit;
+  weightUnit!: WeightUnit;
 
   @IsOptional()
   @IsString()
   note?: string;
 
   @IsISO8601()
-  date: string;
+  date!: string;
 }

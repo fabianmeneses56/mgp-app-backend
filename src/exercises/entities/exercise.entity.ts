@@ -12,22 +12,22 @@ import { WeightUnit } from 'src/exercises/enums/weight-unit.enum';
 @Entity({ name: 'exercises' })
 export class Exercise {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column('text')
-  name: string;
+  name!: string;
 
   @Column({
     type: 'integer',
   })
-  weightGrams: number;
+  weightGrams!: number;
 
   @Column({
     type: 'enum',
     enum: WeightUnit,
     default: WeightUnit.GRAM,
   })
-  weightUnit: WeightUnit;
+  weightUnit!: WeightUnit;
 
   @Column('text', {
     nullable: true,
@@ -35,8 +35,8 @@ export class Exercise {
   imageUrl?: string | null;
 
   @ManyToOne(() => Category, (category) => category.exercise)
-  category: Category;
+  category!: Category;
 
   @OneToMany(() => WeightHistory, (wh) => wh.exercise)
-  weightHistory: WeightHistory[];
+  weightHistory!: WeightHistory[];
 }

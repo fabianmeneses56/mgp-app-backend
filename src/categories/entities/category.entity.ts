@@ -11,14 +11,14 @@ import {
 @Entity({ name: 'categories' })
 export class Category {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column('text')
-  name: string;
+  name!: string;
 
   @ManyToOne(() => User, (user) => user.category, { eager: false })
-  user: User;
+  user!: User;
 
   @OneToMany(() => Exercise, (exercise) => exercise.category, { eager: true })
-  exercise: Exercise;
+  exercise!: Exercise;
 }

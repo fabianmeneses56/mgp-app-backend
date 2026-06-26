@@ -129,6 +129,96 @@ Match section headings by meaning, not by exact wording — the spec may be auth
 
 ---
 
+### Phase 3.5 — Pre-flight analysis
+
+Before starting any implementation, read the spec's data model and implementation plan sections and run the following checks against the existing codebase. Use `grep` and `find` as needed. Do not skip this phase — it catches structural problems that would cause compilation errors mid-implementation.
+
+#### Check 1 — Circular import risk
+
+For every new entity the spec introduces:
+
+1. Identify which existing entities it will import (e.g. via `@ManyToOne`).
+2. Check whether those existing entities will in turn import the new entity (e.g. via `@OneToMany`).
+3. If both sides import each other **and** they share a type (enum, interface, base class) defined inside one of those entity files, that type will be `undefined` at runtime due to the circular import.
+
+**If a circular risk is found:**
+
+- Do not start Step 1 of the plan.
+- Report it to the user:
+
+  ```
+  ⚠️  Circular import risk detected before starting.
+
+  [NewEntity] ↔ [ExistingEntity] — both will import each other.
+  The type "[TypeName]" is currently defined inside [ExistingEntity file].
+  If left there, it will be `undefined` at runtime in [NewEntity].
+
+  Recommended fix: extract "[TypeName]" to a standalone file
+  (e.g. src/[module]/enums/[type-name].enum.ts) and update all
+  existing importers before starting the implementation plan.
+
+  Files that currently import "[TypeName]" from [ExistingEntity]:
+  [list them from grep output]
+
+  Shall I apply this fix as Step 0 before continuing?
+  ```
+
+- Wait for the user's confirmation, then apply the extraction as **Step 0**, touching only the shared-type files and updating all existing importers.
+- After Step 0, resume from Step 1 of the original plan.
+
+#### Check 2 — Duplicated logic
+
+Scan the spec for phrases like "using the same logic as X", "reutiliza Y", "same conversion as", or similar. For each one:
+
+1. Locate the referenced function/method in the codebase.
+2. Assess whether it can be called directly (injecting the service that owns it) or whether it should be extracted to a shared utility (e.g. `src/[module]/utils/`).
+
+**If duplication is unavoidable given the spec's module structure**, flag it as an observation but do not block:
+
+```
+📝 Observation: "[functionName]" will be duplicated in [NewService].
+   Consider extracting it to a shared utility in a future spec.
+   Proceeding as written in the plan.
+```
+
+**If the function can be shared without changing the spec's module structure**, propose it before starting:
+
+```
+📝 "[functionName]" in [ExistingService] can be reused directly.
+   This avoids duplication without changing the spec's scope.
+   Shall I import [ExistingService] / extract the helper instead of copying?
+```
+
+Wait for the user's decision before proceeding.
+
+#### Check 3 — Import chain completeness
+
+When the spec plan involves introducing a new file that other existing files will need to import (e.g. a new enum, a renamed entity, a shared type), proactively run:
+
+```
+grep -r "from '[existing-source]'" src --include="*.ts" -l
+```
+
+List every file that imports from the affected source so that none are missed when updating imports later. Note this list at the start of the relevant implementation step with:
+
+```
+📋 These files import from [source] and may need updating in this step:
+   - src/...
+   - src/...
+```
+
+---
+
+Once all three checks are complete (with no open issues or with the user's decisions recorded), show:
+
+```
+✅ Pre-flight complete. No blocking issues.  (or: Step 0 applied.)
+```
+
+Then continue to Phase 4.
+
+---
+
 ### Phase 4 — Implement step by step
 
 After showing the spec summary, tell the user:
@@ -182,16 +272,23 @@ in your repo's language) and make the final commit before merging this branch.
 ## Summary of expected behavior
 
 ```
-/impl-spec 01-mvp-arkanoid
+/spec-impl 01-weight-history
 
-  Phase 1  →  Finds specs/01-mvp-arkanoid.md
-  Phase 2  →  Reads the state → "Approved" (or "Aprobado", etc.) → ✅ continues
-  Phase 3  →  git checkout -b spec-01-mvp-arkanoid → git checkout spec-01-mvp-arkanoid
-              Shows objective, scope, plan and criteria
-  Phase 4  →  Implements step by step with pauses
-              Ends by reminding to verify the acceptance criteria
+  Phase 1    →  Finds specs/01-weight-history.md
+  Phase 2    →  Reads the state → "Aprovado" → ✅ continues
+  Phase 3    →  git checkout -b spec-01-weight-history (active)
+               Shows objective, scope, plan and criteria
+  Phase 3.5  →  Pre-flight checks:
+               Check 1: WeightHistory ↔ Exercise are circular + WeightUnit
+                        lives inside exercise.entity.ts → ⚠️ proposes Step 0
+               Check 2: "same logic as convertWeightToGrams" → can't inject
+                        ExercisesService cleanly → 📝 flags duplication
+               Check 3: grep for importers of exercise.entity.ts → lists files
+               User confirms → Step 0 applied (enum extracted, imports updated)
+  Phase 4    →  Implements steps 1–6 with pauses
+               Ends by reminding to verify the acceptance criteria
 
-/impl-spec 02-powerups  (state: Draft / Borrador)
+/spec-impl 02-powerups  (state: Draft / Borrador)
 
   Phase 1  →  Finds specs/02-powerups.md
   Phase 2  →  Reads the state → "Draft" → ❌ stops

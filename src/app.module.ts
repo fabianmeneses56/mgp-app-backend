@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { CategoriesModule } from './categories/categories.module';
 import { ExercisesModule } from './exercises/exercises.module';
+import { WeightHistoryModule } from './weight-history/weight-history.module';
 
 @Module({
   imports: [
@@ -26,6 +27,8 @@ import { ExercisesModule } from './exercises/exercises.module';
     CategoriesModule,
 
     ExercisesModule,
+
+    WeightHistoryModule,
   ],
 })
 export class AppModule {}

@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
-import { Exercise, WeightUnit } from './entities/exercise.entity';
+import { convertWeightToGrams } from './utils/convert-weight';
+import { Exercise } from './entities/exercise.entity';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
@@ -31,11 +32,14 @@ export class ExercisesService {
     image?: { filename: string },
   ) {
     try {
-      const category = await this.getUserCategory(createExerciseDto.category, user);
+      const category = await this.getUserCategory(
+        createExerciseDto.category,
+        user,
+      );
 
       const exercise = this.exerciseRepository.create({
         name: createExerciseDto.name,
-        weightGrams: this.convertWeightToGrams(
+        weightGrams: convertWeightToGrams(
           createExerciseDto.weight,
           createExerciseDto.weightUnit,
         ),
@@ -103,7 +107,7 @@ export class ExercisesService {
       name: updateExerciseDto.name ?? currentExercise.name,
       weightGrams:
         updateExerciseDto.weight !== undefined
-          ? this.convertWeightToGrams(
+          ? convertWeightToGrams(
               updateExerciseDto.weight,
               updateExerciseDto.weightUnit ?? currentExercise.weightUnit,
             )
@@ -122,7 +126,9 @@ export class ExercisesService {
       await this.exerciseRepository.save(exercise);
 
       if (image && currentExercise.imageUrl) {
-        await this.deleteImageIfExists(this.extractFilename(currentExercise.imageUrl));
+        await this.deleteImageIfExists(
+          this.extractFilename(currentExercise.imageUrl),
+        );
       }
 
       return this.findOne(id, user);
@@ -152,19 +158,6 @@ export class ExercisesService {
     );
   }
 
-  private convertWeightToGrams(weight: number, unit: WeightUnit) {
-    switch (unit) {
-      case WeightUnit.GRAM:
-        return Math.round(weight);
-      case WeightUnit.KILOGRAM:
-        return Math.round(weight * 1000);
-      case WeightUnit.POUND:
-        return Math.round(weight * 453.592);
-      default:
-        return Math.round(weight);
-    }
-  }
-
   private async getUserCategory(categoryId: string, user: User) {
     const category = await this.categoryRepository.findOne({
       where: {
@@ -190,7 +183,9 @@ export class ExercisesService {
     if (!filename) return;
 
     try {
-      await unlink(join(process.cwd(), 'static', 'uploads', 'exercises', filename));
+      await unlink(
+        join(process.cwd(), 'static', 'uploads', 'exercises', filename),
+      );
     } catch {
       return;
     }

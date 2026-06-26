@@ -1,11 +1,13 @@
 import { Category } from 'src/categories/entities/category.entity';
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
-
-export enum WeightUnit {
-  GRAM = 'g',
-  KILOGRAM = 'kg',
-  POUND = 'lb',
-}
+import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
+import {
+  Column,
+  Entity,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+import { WeightUnit } from 'src/exercises/enums/weight-unit.enum';
 
 @Entity({ name: 'exercises' })
 export class Exercise {
@@ -35,5 +37,6 @@ export class Exercise {
   @ManyToOne(() => Category, (category) => category.exercise)
   category: Category;
 
-  //   lastUpdateDate: string;
+  @OneToMany(() => WeightHistory, (wh) => wh.exercise)
+  weightHistory: WeightHistory[];
 }

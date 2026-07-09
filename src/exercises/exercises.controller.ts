@@ -15,28 +15,12 @@ import { ExercisesService } from './exercises.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync } from 'fs';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
+import { memoryStorage } from 'multer';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/auth/entities/user.entity';
 
-const exerciseImageStorage = diskStorage({
-  destination: (_req, _file, cb) => {
-    const destinationPath = join(process.cwd(), 'static', 'uploads', 'exercises');
-
-    if (!existsSync(destinationPath)) {
-      mkdirSync(destinationPath, { recursive: true });
-    }
-
-    cb(null, destinationPath);
-  },
-  filename: (_req, file, cb) => {
-    cb(null, `${randomUUID()}${extname(file.originalname)}`);
-  },
-});
+const exerciseImageStorage = memoryStorage();
 
 const exerciseImageFileFilter = (_req, file, cb) => {
   if (file.mimetype.match(/^image\/(jpeg|png|webp)$/)) {
@@ -67,7 +51,7 @@ export class ExercisesController {
   create(
     @Body() createExerciseDto: CreateExerciseDto,
     @GetUser() user: User,
-    @UploadedFile() image?: { filename: string },
+    @UploadedFile() image?: Express.Multer.File,
   ) {
     return this.exercisesService.create(createExerciseDto, user, image);
   }
@@ -97,7 +81,7 @@ export class ExercisesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateExerciseDto: UpdateExerciseDto,
     @GetUser() user: User,
-    @UploadedFile() image?: { filename: string },
+    @UploadedFile() image?: Express.Multer.File,
   ) {
     return this.exercisesService.update(id, updateExerciseDto, user, image);
   }

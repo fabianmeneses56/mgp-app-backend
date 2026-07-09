@@ -6,6 +6,7 @@ import { ConfigModule } from '@nestjs/config';
 import { CategoriesModule } from './categories/categories.module';
 import { ExercisesModule } from './exercises/exercises.module';
 import { WeightHistoryModule } from './weight-history/weight-history.module';
+import { CloudflareR2Module } from './cloudflare-r2/cloudflare-r2.module';
 
 @Module({
   imports: [
@@ -23,6 +24,8 @@ import { WeightHistoryModule } from './weight-history/weight-history.module';
     }),
 
     AuthModule,
+
+    CloudflareR2Module,
 
     CategoriesModule,
 

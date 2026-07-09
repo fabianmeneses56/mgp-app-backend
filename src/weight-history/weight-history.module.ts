@@ -7,10 +7,7 @@ import { WeightHistoryController } from './weight-history.controller';
 import { WeightHistoryService } from './weight-history.service';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([WeightHistory, Exercise]),
-    AuthModule,
-  ],
+  imports: [TypeOrmModule.forFeature([WeightHistory, Exercise]), AuthModule],
   controllers: [WeightHistoryController],
   providers: [WeightHistoryService],
 })

@@ -1,7 +1,7 @@
 ---
 id: 01
 title: Weight History — CRUD de historial de pesos por ejercicio
-state: Aprovado
+state: Implemented
 date: 2026-06-26
 depends_on: exercises (módulo existente)
 ---

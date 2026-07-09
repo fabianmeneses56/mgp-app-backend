@@ -4,6 +4,9 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
+import { extname } from 'path';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { convertWeightToGrams } from './utils/convert-weight';
@@ -13,8 +16,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
 import { User } from 'src/auth/entities/user.entity';
 import { Category } from 'src/categories/entities/category.entity';
-import { unlink } from 'fs/promises';
-import { join } from 'path';
+import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
+import { CloudflareR2Service } from 'src/cloudflare-r2/cloudflare-r2.service';
 
 @Injectable()
 export class ExercisesService {
@@ -24,18 +27,38 @@ export class ExercisesService {
 
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+
+    @InjectRepository(WeightHistory)
+    private readonly weightHistoryRepository: Repository<WeightHistory>,
+
+    private readonly cloudflareR2Service: CloudflareR2Service,
+
+    private readonly configService: ConfigService,
   ) {}
 
   async create(
     createExerciseDto: CreateExerciseDto,
     user: User,
-    image?: { filename: string },
+    image?: Express.Multer.File,
   ) {
+    let key: string | undefined;
+
     try {
       const category = await this.getUserCategory(
         createExerciseDto.category,
         user,
       );
+
+      let imageUrl: string | null = null;
+
+      if (image) {
+        key = this.buildImageKey(image);
+        imageUrl = await this.cloudflareR2Service.uploadFile(
+          key,
+          image.buffer,
+          image.mimetype,
+        );
+      }
 
       const exercise = this.exerciseRepository.create({
         name: createExerciseDto.name,
@@ -44,15 +67,16 @@ export class ExercisesService {
           createExerciseDto.weightUnit,
         ),
         weightUnit: createExerciseDto.weightUnit,
-        imageUrl: image ? `/uploads/exercises/${image.filename}` : null,
+        imageUrl,
         category,
       });
 
       await this.exerciseRepository.save(exercise);
+      await this.recordWeightHistory(exercise);
 
       return this.findOne(exercise.id, user);
     } catch (error) {
-      await this.deleteImageIfExists(image?.filename);
+      if (key) await this.cloudflareR2Service.deleteFile(key);
       this.handleDBExceptions(error);
     }
   }
@@ -84,7 +108,7 @@ export class ExercisesService {
     id: string,
     updateExerciseDto: UpdateExerciseDto,
     user: User,
-    image?: { filename: string },
+    image?: Express.Multer.File,
   ) {
     if (
       updateExerciseDto.weightUnit !== undefined &&
@@ -102,6 +126,18 @@ export class ExercisesService {
       category = await this.getUserCategory(updateExerciseDto.category, user);
     }
 
+    let newImageKey: string | undefined;
+    let imageUrl = currentExercise.imageUrl;
+
+    if (image) {
+      newImageKey = this.buildImageKey(image);
+      imageUrl = await this.cloudflareR2Service.uploadFile(
+        newImageKey,
+        image.buffer,
+        image.mimetype,
+      );
+    }
+
     const exercise = await this.exerciseRepository.preload({
       id,
       name: updateExerciseDto.name ?? currentExercise.name,
@@ -113,9 +149,7 @@ export class ExercisesService {
             )
           : currentExercise.weightGrams,
       weightUnit: updateExerciseDto.weightUnit ?? currentExercise.weightUnit,
-      imageUrl: image
-        ? `/uploads/exercises/${image.filename}`
-        : currentExercise.imageUrl,
+      imageUrl,
       category,
     });
 
@@ -125,15 +159,19 @@ export class ExercisesService {
     try {
       await this.exerciseRepository.save(exercise);
 
-      if (image && currentExercise.imageUrl) {
-        await this.deleteImageIfExists(
-          this.extractFilename(currentExercise.imageUrl),
+      if (updateExerciseDto.weight !== undefined) {
+        await this.recordWeightHistory(exercise);
+      }
+
+      if (newImageKey && currentExercise.imageUrl) {
+        await this.cloudflareR2Service.deleteFile(
+          this.extractKeyFromUrl(currentExercise.imageUrl),
         );
       }
 
       return this.findOne(id, user);
     } catch (error) {
-      await this.deleteImageIfExists(image?.filename);
+      if (newImageKey) await this.cloudflareR2Service.deleteFile(newImageKey);
       this.handleDBExceptions(error);
     }
   }
@@ -144,7 +182,9 @@ export class ExercisesService {
     await this.exerciseRepository.remove(exercise);
 
     if (exercise.imageUrl) {
-      await this.deleteImageIfExists(this.extractFilename(exercise.imageUrl));
+      await this.cloudflareR2Service.deleteFile(
+        this.extractKeyFromUrl(exercise.imageUrl),
+      );
     }
   }
 
@@ -175,19 +215,27 @@ export class ExercisesService {
     return category;
   }
 
-  private extractFilename(imageUrl: string) {
-    return imageUrl.split('/').pop() ?? '';
+  private async recordWeightHistory(exercise: Exercise) {
+    const entry = this.weightHistoryRepository.create({
+      weightGrams: exercise.weightGrams,
+      weightUnit: exercise.weightUnit,
+      note: null,
+      date: new Date(),
+      exercise,
+    });
+
+    await this.weightHistoryRepository.save(entry);
   }
 
-  private async deleteImageIfExists(filename?: string) {
-    if (!filename) return;
+  private buildImageKey(image: Express.Multer.File) {
+    return `exercises/${randomUUID()}${extname(image.originalname)}`;
+  }
 
-    try {
-      await unlink(
-        join(process.cwd(), 'static', 'uploads', 'exercises', filename),
-      );
-    } catch {
-      return;
-    }
+  private extractKeyFromUrl(imageUrl: string) {
+    const publicUrl = this.configService.get<string>(
+      'CLOUDFLARE_R2_PUBLIC_URL',
+    );
+
+    return imageUrl.replace(`${publicUrl}/`, '');
   }
 }

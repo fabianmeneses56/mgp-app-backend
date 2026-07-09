@@ -7,6 +7,13 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
+  const corsOrigin = process.env.CORS_ORIGIN;
+  app.enableCors({
+    origin: corsOrigin
+      ? corsOrigin.split(',').map((origin) => origin.trim())
+      : true,
+  });
+
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

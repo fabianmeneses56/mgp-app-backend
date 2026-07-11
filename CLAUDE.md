@@ -16,7 +16,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment
 
-The app expects a `.env` file with `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PORT`, `HOST_API`, `JWT_SECRET`, `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_BUCKET_NAME`, `CLOUDFLARE_R2_PUBLIC_URL`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`. `TypeOrmModule.forRoot` runs with `synchronize: true` and `autoLoadEntities: true` (see `src/app.module.ts`), so entity changes apply to the DB schema automatically on boot — there are no migrations.
+The app expects a `.env` file with `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PORT`, `HOST_API`, `JWT_SECRET`, `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_BUCKET_NAME`, `CLOUDFLARE_R2_PUBLIC_URL`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`. `TypeOrmModule.forRoot` (`src/app.module.ts`) runs with `autoLoadEntities: true` always, but `synchronize`/`migrationsRun` are env-driven: in dev (`NODE_ENV !== 'production'`) `synchronize: true` auto-applies entity changes to the schema; in production `synchronize` is off and `migrationsRun: true` applies migrations from `src/migrations/` on boot instead.
+
+## Deployment (Railway)
+
+The app auto-deploys on every push to `main` — Railway is connected directly to the GitHub repo. There are two services: the Nest app and a managed Postgres, wired together via Railway variable references (`DB_HOST` → `${{Postgres.PGHOST}}`, etc.). Production sets `NODE_ENV=production`, its own `JWT_SECRET` (different from the local `.env` one), and `CORS_ORIGIN` left empty since the only consumer is a React Native/Expo app (CORS is a browser-only mechanism, irrelevant to native clients).
+
+**If a change touches an `entities/` file (new/removed/renamed column, new entity, changed type/constraint), a migration must be generated and committed before pushing** — production has `synchronize: false` and only applies schema changes via `src/migrations/`, so an entity change without a matching migration silently desyncs the deployed DB from the code. Generate it with:
+
+```
+yarn migration:generate src/migrations/NombreDelCambio
+```
+
+(requires the local Postgres up via `docker-compose up -d`) and commit the generated file. `src/data-source.ts` is the DataSource used by this CLI command (mirrors the `TypeOrmModule.forRoot` config for migration purposes only).
 
 ## Architecture
 

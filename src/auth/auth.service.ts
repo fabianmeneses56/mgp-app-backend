@@ -49,10 +49,10 @@ export class AuthService {
       where: { email },
       select: { email: true, password: true, id: true }, //! OJO! solo recibo lo que pongo en el select
     });
-    if (!user)
-      throw new UnauthorizedException('Credentials are not valid (email)');
+    // Same message for both cases so responses don't reveal which emails exist.
+    if (!user) throw new UnauthorizedException('Credentials are not valid');
     if (!bcrypt.compareSync(password, user.password!))
-      throw new UnauthorizedException('Credentials are not valid (password)');
+      throw new UnauthorizedException('Credentials are not valid');
     return {
       ...user,
       token: this.getJwtToken({ id: user.id }),
@@ -72,7 +72,9 @@ export class AuthService {
   }
 
   private handleDBErrors(error: any): never {
-    if (error.code === '23505') throw new BadRequestException(error.detail);
+    // error.detail would leak Postgres internals (table/column names, values).
+    if (error.code === '23505')
+      throw new BadRequestException('Email is already registered');
 
     console.log(error);
 

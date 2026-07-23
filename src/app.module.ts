@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AuthModule } from './auth/auth.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -11,6 +13,13 @@ import { CloudflareR2Module } from './cloudflare-r2/cloudflare-r2.module';
 @Module({
   imports: [
     ConfigModule.forRoot(),
+
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60_000,
+        limit: 100,
+      },
+    ]),
 
     TypeOrmModule.forRoot({
       type: 'postgres',
@@ -26,8 +35,7 @@ import { CloudflareR2Module } from './cloudflare-r2/cloudflare-r2.module';
       // DB_SSL=false lets a production deploy (VPS docker Postgres, no TLS)
       // opt out; unset keeps the previous behavior (SSL on in production, Railway).
       ssl:
-        process.env.DB_SSL !== 'false' &&
-        process.env.NODE_ENV === 'production'
+        process.env.DB_SSL !== 'false' && process.env.NODE_ENV === 'production'
           ? { rejectUnauthorized: false }
           : false,
     }),
@@ -41,6 +49,12 @@ import { CloudflareR2Module } from './cloudflare-r2/cloudflare-r2.module';
     ExercisesModule,
 
     WeightHistoryModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

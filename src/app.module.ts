@@ -23,7 +23,10 @@ import { CloudflareR2Module } from './cloudflare-r2/cloudflare-r2.module';
       synchronize: process.env.NODE_ENV !== 'production',
       migrations: [__dirname + '/migrations/*{.ts,.js}'],
       migrationsRun: process.env.NODE_ENV === 'production',
+      // DB_SSL=false lets a production deploy (VPS docker Postgres, no TLS)
+      // opt out; unset keeps the previous behavior (SSL on in production, Railway).
       ssl:
+        process.env.DB_SSL !== 'false' &&
         process.env.NODE_ENV === 'production'
           ? { rejectUnauthorized: false }
           : false,

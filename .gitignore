@@ -41,8 +41,12 @@ lerna-debug.log*
 .env
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 .env.local
+
+# database dumps
+*.dump
 
 # temp directory
 .temp

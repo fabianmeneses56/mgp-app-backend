@@ -1,6 +1,8 @@
 # Migración del backend MGP: Railway → VPS (Hostinger)
 
-> **Estado**: la Fase 1 (este PR) ya está hecha. Las Fases 2–5 (bootstrap del VPS, migración de datos, despliegue, cutover) se ejecutan después de revisar/mergear este PR y con las credenciales necesarias a mano.
+> **Estado**: Fases 1–4 completas (PR mergeado, VPS bootstrapeado, datos migrados desde Railway, stack en producción sirviendo en `https://$DOMAIN/api` con TLS y auto-deploy verificado). Fase 5 (cutover) pendiente: falta apuntar la app Expo/RN al nuevo dominio y decidir cuándo apagar Railway.
+>
+> Nota: Railway corre Postgres 18, no 17 como se asumió originalmente — `docker-compose.prod.yml` usa `postgres:18-alpine` (el mount de datos también cambió a `/var/lib/postgresql`, requerido por la imagen 18+). Backup diario automático corriendo vía cron (`~/backups/daily-backup.sh`, 3am, retiene 14 días).
 
 ## Contexto
 

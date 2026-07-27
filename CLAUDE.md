@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment
 
-The app expects a `.env` file with `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PORT`, `HOST_API`, `JWT_SECRET`, `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_BUCKET_NAME`, `CLOUDFLARE_R2_PUBLIC_URL`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`. `TypeOrmModule.forRoot` (`src/app.module.ts`) runs with `autoLoadEntities: true` always, but `synchronize`/`migrationsRun` are env-driven: in dev (`NODE_ENV !== 'production'`) `synchronize: true` auto-applies entity changes to the schema; in production `synchronize` is off and `migrationsRun: true` applies migrations from `src/migrations/` on boot instead.
+The app expects a `.env` file with `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PORT`, `HOST_API`, `JWT_SECRET`, `CLOUDFLARE_R2_ACCOUNT_ID`, `CLOUDFLARE_R2_BUCKET_NAME`, `CLOUDFLARE_R2_PUBLIC_URL`, `CLOUDFLARE_R2_ACCESS_KEY_ID`, `CLOUDFLARE_R2_SECRET_ACCESS_KEY`. `TypeOrmModule.forRootAsync` (`src/app.module.ts`, factory in `src/config/database.factory.ts`) runs with `autoLoadEntities: true` always, but `synchronize`/`migrationsRun` are env-driven: in dev (`NODE_ENV !== 'production'`) `synchronize: true` auto-applies entity changes to the schema; in production `synchronize` is off and `migrationsRun: true` applies migrations from `src/migrations/` on boot instead.
 
 ## Deployment (Railway)
 
@@ -28,7 +28,7 @@ The app auto-deploys on every push to `main` — Railway is connected directly t
 yarn migration:generate src/migrations/NombreDelCambio
 ```
 
-(requires the local Postgres up via `docker-compose up -d`) and commit the generated file. `src/data-source.ts` is the DataSource used by this CLI command (mirrors the `TypeOrmModule.forRoot` config for migration purposes only).
+(requires the local Postgres up via `docker-compose up -d`) and commit the generated file. `src/data-source.ts` is the DataSource used by this CLI command (mirrors the `database.factory.ts` config for migration purposes only).
 
 ## Architecture
 

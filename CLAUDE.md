@@ -32,7 +32,7 @@ yarn migration:generate src/migrations/NombreDelCambio
 
 ## Architecture
 
-NestJS REST API with a global `api` prefix (`src/main.ts`) and a global `ValidationPipe` (`whitelist: true`, `forbidNonWhitelisted: true`, `transform: true`) — DTOs must declare every accepted field with `class-validator` decorators or requests get rejected. Exercise images are uploaded to Cloudflare R2 (see below), not served from local disk.
+NestJS REST API with a global `api` prefix (`src/main.ts`) and a global `ValidationPipe` (`whitelist: true`, `forbidNonWhitelisted: true`, `transform: true`) — DTOs must declare every accepted field with `class-validator` decorators or requests get rejected. Rate limiting is global via `ThrottlerGuard` (`@nestjs/throttler`, 100 req/min per IP, `src/app.module.ts`), with a stricter 5 req/min `@Throttle` override on `POST /auth/login` and `/auth/register`; `main.ts` sets `trust proxy` in production so the per-IP buckets see the real client IP behind Caddy. Exercise images are uploaded to Cloudflare R2 (see below), not served from local disk.
 
 Four feature modules/providers, each following the standard Nest CRUD module shape (`*.module.ts` / `*.controller.ts` / `*.service.ts` / `dto/` / `entities/`) where applicable:
 

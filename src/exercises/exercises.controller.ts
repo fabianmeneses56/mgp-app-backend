@@ -15,22 +15,23 @@ import { ExercisesService } from './exercises.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
+import { memoryStorage, FileFilterCallback } from 'multer';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/auth/entities/user.entity';
 
 const exerciseImageStorage = memoryStorage();
 
-const exerciseImageFileFilter = (_req, file, cb) => {
+const exerciseImageFileFilter = (
+  _req: Express.Request,
+  file: Express.Multer.File,
+  cb: FileFilterCallback,
+) => {
   if (file.mimetype.match(/^image\/(jpeg|png|webp)$/)) {
     return cb(null, true);
   }
 
-  cb(
-    new BadRequestException('Only jpeg, png, and webp images are allowed'),
-    false,
-  );
+  cb(new BadRequestException('Only jpeg, png, and webp images are allowed'));
 };
 
 @Controller('exercises')

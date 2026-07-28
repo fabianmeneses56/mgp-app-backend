@@ -1,7 +1,9 @@
-name: Deploy to VPS
+name: CI & Deploy to VPS
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -10,7 +12,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Lint
+        run: yarn eslint "{src,apps,libs,test}/**/*.ts"
+
+      - name: Build
+        run: yarn build
+
   deploy:
+    needs: ci
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Connect to Tailscale

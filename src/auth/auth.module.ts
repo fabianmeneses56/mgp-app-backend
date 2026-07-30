@@ -8,10 +8,16 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
+import { BcryptPasswordHasher } from './password-hasher/bcrypt-password-hasher';
+import { PasswordHasher } from './password-hasher/password-hasher';
 
 @Module({
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    { provide: PasswordHasher, useClass: BcryptPasswordHasher },
+  ],
   imports: [
     ConfigModule,
     TypeOrmModule.forFeature([User]),

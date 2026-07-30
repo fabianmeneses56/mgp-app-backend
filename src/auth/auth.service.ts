@@ -9,9 +9,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { Repository } from 'typeorm';
 
-import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { JwtPayload } from './interfaces';
+import { PasswordHasher } from './password-hasher/password-hasher';
 
 @Injectable()
 export class AuthService {
@@ -20,6 +20,7 @@ export class AuthService {
     private readonly userRepository: Repository<User>,
 
     private readonly jwtService: JwtService,
+    private readonly passwordHasher: PasswordHasher,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
@@ -28,7 +29,7 @@ export class AuthService {
 
       const user = this.userRepository.create({
         ...userData,
-        password: bcrypt.hashSync(password, 10),
+        password: await this.passwordHasher.hash(password),
       });
 
       await this.userRepository.save(user);
@@ -51,7 +52,7 @@ export class AuthService {
     });
     // Same message for both cases so responses don't reveal which emails exist.
     if (!user) throw new UnauthorizedException('Credentials are not valid');
-    if (!bcrypt.compareSync(password, user.password!))
+    if (!(await this.passwordHasher.compare(password, user.password!)))
       throw new UnauthorizedException('Credentials are not valid');
     return {
       ...user,

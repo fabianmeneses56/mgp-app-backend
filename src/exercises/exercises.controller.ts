@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   UploadedFile,
   UseInterceptors,
+  Query,
 } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
@@ -19,6 +20,7 @@ import { memoryStorage, FileFilterCallback } from 'multer';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { User } from 'src/auth/entities/user.entity';
+import { FindExercisesDto } from './dto/find-exercises.dto';
 
 const exerciseImageStorage = memoryStorage();
 
@@ -58,8 +60,9 @@ export class ExercisesController {
   }
 
   @Get()
-  findAll() {
-    return this.exercisesService.findAll();
+  @Auth()
+  findAll(@Query() dto: FindExercisesDto, @GetUser() user: User) {
+    return this.exercisesService.findAll(dto, user);
   }
 
   @Get(':id')

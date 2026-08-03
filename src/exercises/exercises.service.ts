@@ -18,6 +18,8 @@ import { User } from 'src/auth/entities/user.entity';
 import { Category } from 'src/categories/entities/category.entity';
 import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
 import { CloudflareR2Service } from 'src/cloudflare-r2/cloudflare-r2.service';
+import { FindExercisesDto } from './dto/find-exercises.dto';
+import { SearchQueryBuilder } from 'src/common/builders/search-query.builder';
 
 @Injectable()
 export class ExercisesService {
@@ -81,8 +83,45 @@ export class ExercisesService {
     }
   }
 
-  findAll() {
-    return `This action returns all exercises`;
+  async findAll(dto: FindExercisesDto, user: User) {
+    const query = new SearchQueryBuilder<Exercise>()
+      .where('name', dto.name)
+      .where('weightUnit', dto.weightUnit)
+      .orderBy(dto.sortField ?? 'name', dto.sortOrder ?? 'ASC')
+      .paginate(dto.page ?? 1, dto.limit ?? 10)
+      .build();
+
+    console.log('query', query);
+    const qb = this.exerciseRepository
+      .createQueryBuilder('exercise')
+      .leftJoinAndSelect('exercise.category', 'category')
+      .where('category.userId = :userId', { userId: user.id }); // ownership scoping
+
+    if (dto.category) {
+      qb.andWhere('category.id = :categoryId', { categoryId: dto.category });
+    }
+
+    for (const [field, value] of Object.entries(query.filters)) {
+      if (field === 'name') {
+        qb.andWhere('exercise.name ILIKE :name', { name: `%${value}%` });
+      } else {
+        qb.andWhere(`exercise.${field} = :${field}`, { [field]: value });
+      }
+    }
+
+    if (query.sort) {
+      qb.orderBy(`exercise.${String(query.sort.field)}`, query.sort.order);
+    }
+
+    const { page, limit } = query.pagination;
+    qb.skip((page - 1) * limit).take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return {
+      data,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async findOne(id: string, user?: User) {

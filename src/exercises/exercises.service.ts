@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -11,8 +12,8 @@ import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { convertWeightToGrams } from './utils/convert-weight';
 import { Exercise } from './entities/exercise.entity';
-import { Repository } from 'typeorm';
-import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
 import { User } from 'src/auth/entities/user.entity';
 import { Category } from 'src/categories/entities/category.entity';
@@ -34,8 +35,12 @@ export class ExercisesService {
     private readonly cloudflareR2Service: CloudflareR2Service,
 
     private readonly configService: ConfigService,
+
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
+  @LogExecutionTime()
   async create(
     createExerciseDto: CreateExerciseDto,
     user: User,
@@ -43,24 +48,28 @@ export class ExercisesService {
   ) {
     let key: string | undefined;
 
-    try {
-      const category = await this.getUserCategory(
-        createExerciseDto.category,
-        user,
+    const category = await this.getUserCategory(
+      createExerciseDto.category,
+      user,
+    );
+
+    let imageUrl: string | null = null;
+    if (image) {
+      key = this.buildImageKey(image);
+      imageUrl = await this.cloudflareR2Service.uploadFile(
+        key,
+        image.buffer,
+        image.mimetype,
       );
+    }
 
-      let imageUrl: string | null = null;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
 
-      if (image) {
-        key = this.buildImageKey(image);
-        imageUrl = await this.cloudflareR2Service.uploadFile(
-          key,
-          image.buffer,
-          image.mimetype,
-        );
-      }
+    try {
+      await queryRunner.startTransaction();
 
-      const exercise = this.exerciseRepository.create({
+      const exercise = queryRunner.manager.create(Exercise, {
         name: createExerciseDto.name,
         weightGrams: convertWeightToGrams(
           createExerciseDto.weight,
@@ -70,14 +79,20 @@ export class ExercisesService {
         imageUrl,
         category,
       });
+      await queryRunner.manager.save(exercise);
 
-      await this.exerciseRepository.save(exercise);
-      await this.recordWeightHistory(exercise);
+      await this.recordWeightHistory(exercise, queryRunner.manager);
 
-      return this.findOne(exercise.id, user);
+      await queryRunner.commitTransaction();
+      return exercise;
     } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       if (key) await this.cloudflareR2Service.deleteFile(key);
       this.handleDBExceptions(error);
+    } finally {
+      await queryRunner.release();
     }
   }
 
@@ -156,24 +171,36 @@ export class ExercisesService {
     if (!exercise)
       throw new NotFoundException(`Exercise with id: ${id} not found`);
 
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+
     try {
-      await this.exerciseRepository.save(exercise);
+      await queryRunner.startTransaction();
+
+      await queryRunner.manager.save(exercise);
 
       if (updateExerciseDto.weight !== undefined) {
-        await this.recordWeightHistory(exercise);
+        await this.recordWeightHistory(exercise, queryRunner.manager);
       }
 
-      if (newImageKey && currentExercise.imageUrl) {
-        await this.cloudflareR2Service.deleteFile(
-          this.extractKeyFromUrl(currentExercise.imageUrl),
-        );
-      }
-
-      return this.findOne(id, user);
+      await queryRunner.commitTransaction();
     } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       if (newImageKey) await this.cloudflareR2Service.deleteFile(newImageKey);
       this.handleDBExceptions(error);
+    } finally {
+      await queryRunner.release();
     }
+
+    if (newImageKey && currentExercise.imageUrl) {
+      await this.cloudflareR2Service.deleteFile(
+        this.extractKeyFromUrl(currentExercise.imageUrl),
+      );
+    }
+
+    return this.findOne(id, user);
   }
 
   async remove(id: string, user: User) {
@@ -215,8 +242,15 @@ export class ExercisesService {
     return category;
   }
 
-  private async recordWeightHistory(exercise: Exercise) {
-    const entry = this.weightHistoryRepository.create({
+  private async recordWeightHistory(
+    exercise: Exercise,
+    manager?: EntityManager,
+  ) {
+    const repository = manager
+      ? manager.getRepository(WeightHistory)
+      : this.weightHistoryRepository;
+
+    const entry = repository.create({
       weightGrams: exercise.weightGrams,
       weightUnit: exercise.weightUnit,
       note: null,
@@ -224,7 +258,7 @@ export class ExercisesService {
       exercise,
     });
 
-    await this.weightHistoryRepository.save(entry);
+    await repository.save(entry);
   }
 
   private buildImageKey(image: Express.Multer.File) {
@@ -238,4 +272,33 @@ export class ExercisesService {
 
     return imageUrl.replace(`${publicUrl}/`, '');
   }
+}
+
+export function LogExecutionTime() {
+  return function (
+    target: object,
+    propertyKey: string,
+    descriptor: PropertyDescriptor,
+  ) {
+    const originalMethod = descriptor.value as (
+      ...args: any[]
+    ) => Promise<unknown>;
+    const logger = new Logger(target.constructor.name);
+
+    descriptor.value = async function (...args: any[]) {
+      const start = performance.now();
+      try {
+        const result: unknown = await originalMethod.apply(this, args);
+        const duration = performance.now() - start;
+        logger.debug(`[${propertyKey}] ejecutado en ${duration.toFixed(2)}ms`);
+        return result;
+      } catch (error) {
+        const duration = performance.now() - start;
+        logger.debug(`[${propertyKey}] fallo tras ${duration.toFixed(2)}ms`);
+        throw error;
+      }
+    };
+
+    return descriptor;
+  };
 }

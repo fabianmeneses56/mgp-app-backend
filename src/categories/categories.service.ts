@@ -59,8 +59,25 @@ export class CategoriesService {
     return category;
   }
 
+  async findOneByUser(id: string, user: User) {
+    const category = await this.categoryRepository.findOne({
+      where: {
+        id,
+        user: { id: user.id },
+      },
+    });
+
+    if (!category) {
+      throw new NotFoundException(
+        `Category with id: ${id} not found for this user`,
+      );
+    }
+
+    return category;
+  }
+
   async update(id: string, updateCategoryDto: UpdateCategoryDto, user: User) {
-    console.log(updateCategoryDto, user);
+    await this.findOneByUser(id, user);
 
     const category = await this.categoryRepository.preload({
       id,
@@ -70,15 +87,13 @@ export class CategoriesService {
     if (!category)
       throw new NotFoundException(`Category with id: ${id} not found`);
 
-    category.user = user;
-
     await this.categoryRepository.save(category);
 
     return this.findOne(id);
   }
 
-  async remove(id: string) {
-    const category = await this.findOne(id);
+  async remove(id: string, user: User) {
+    const category = await this.findOneByUser(id, user);
     await this.categoryRepository.remove(category);
   }
 
@@ -86,7 +101,7 @@ export class CategoriesService {
     if (error.code === '23505') throw new BadRequestException(error.detail);
 
     // this.logger.error(error);
-    // console.log(error)
+
     throw new InternalServerErrorException(
       'Unexpected error, check server logs',
     );

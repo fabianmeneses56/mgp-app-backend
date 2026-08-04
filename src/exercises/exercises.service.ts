@@ -16,9 +16,9 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
 import { User } from 'src/auth/entities/user.entity';
-import { Category } from 'src/categories/entities/category.entity';
 import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
 import { CloudflareR2Service } from 'src/cloudflare-r2/cloudflare-r2.service';
+import { CategoriesService } from 'src/categories/categories.service';
 
 @Injectable()
 export class ExercisesService {
@@ -26,8 +26,7 @@ export class ExercisesService {
     @InjectRepository(Exercise)
     private readonly exerciseRepository: Repository<Exercise>,
 
-    @InjectRepository(Category)
-    private readonly categoryRepository: Repository<Category>,
+    private readonly categoriesService: CategoriesService,
 
     @InjectRepository(WeightHistory)
     private readonly weightHistoryRepository: Repository<WeightHistory>,
@@ -48,7 +47,7 @@ export class ExercisesService {
   ) {
     let key: string | undefined;
 
-    const category = await this.getUserCategory(
+    const category = await this.categoriesService.findOneByUser(
       createExerciseDto.category,
       user,
     );
@@ -138,7 +137,10 @@ export class ExercisesService {
     let category = currentExercise.category;
 
     if (updateExerciseDto.category) {
-      category = await this.getUserCategory(updateExerciseDto.category, user);
+      category = await this.categoriesService.findOneByUser(
+        updateExerciseDto.category,
+        user,
+      );
     }
 
     let newImageKey: string | undefined;
@@ -219,27 +221,10 @@ export class ExercisesService {
     if (error.code === '23505') throw new BadRequestException(error.detail);
 
     // this.logger.error(error);
-    // console.log(error)
+
     throw new InternalServerErrorException(
       'Unexpected error, check server logs',
     );
-  }
-
-  private async getUserCategory(categoryId: string, user: User) {
-    const category = await this.categoryRepository.findOne({
-      where: {
-        id: categoryId,
-        user: { id: user.id },
-      },
-    });
-
-    if (!category) {
-      throw new NotFoundException(
-        `Category with id: ${categoryId} not found for this user`,
-      );
-    }
-
-    return category;
   }
 
   private async recordWeightHistory(

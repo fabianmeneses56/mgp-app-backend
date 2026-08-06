@@ -1,6 +1,6 @@
 # Spec 04 — Base de tests unitarios de services
 
-- **Estado:** Approved
+- **Estado:** Implemented
 - **Dependencias:** ninguna (usa `jest`, `ts-jest` y `@nestjs/testing`, ya instalados)
 - **Fecha:** 2026-08-05
 

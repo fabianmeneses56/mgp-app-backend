@@ -1,8 +1,8 @@
 # Migración del backend MGP: Railway → VPS (Hostinger)
 
-> **Estado**: Fases 1–4 completas (PR mergeado, VPS bootstrapeado, datos migrados desde Railway, stack en producción sirviendo en `https://$DOMAIN/api` con TLS y auto-deploy verificado). Fase 5 (cutover) pendiente: falta apuntar la app Expo/RN al nuevo dominio y decidir cuándo apagar Railway.
+> **Estado**: Fases 1–4 completas (PR mergeado, VPS bootstrapeado, datos migrados desde Railway, stack en producción sirviendo en `https://$DOMAIN/api` con TLS y auto-deploy verificado). Fase 5 en curso: app apuntando al VPS y funcionando confirmado por el usuario; auto-deploy de Railway desconectado manualmente en su dashboard. Pendiente: pausar/borrar los servicios de Railway (app + Postgres) para frenar el consumo.
 >
-> Nota: Railway corre Postgres 18, no 17 como se asumió originalmente — `docker-compose.prod.yml` usa `postgres:18-alpine` (el mount de datos también cambió a `/var/lib/postgresql`, requerido por la imagen 18+). Backup diario automático corriendo vía cron (`~/backups/daily-backup.sh`, 3am, retiene 14 días).
+> Nota: Railway corre Postgres 18, no 17 como se asumió originalmente — `docker-compose.prod.yml` usa `postgres:18-alpine` (el mount de datos también cambió a `/var/lib/postgresql`, requerido por la imagen 18+). Backup diario automático corriendo vía cron (`~/backups/daily-backup.sh`, 3am, retiene 7 días).
 
 ## Contexto
 
@@ -81,10 +81,10 @@ Tras esto, verifico `docker ps` funciona para `claude` (puede requerir re-login 
 
 ## Fase 5 — Cutover y limpieza
 
-1. Usuario actualiza la URL base del API en la app Expo/React Native a `https://$DOMAIN/api` y publica el update (EAS Update/OTA o build).
-2. Railway queda vivo como fallback hasta confirmar que todo funciona (los datos nuevos escritos en el VPS **no** se sincronizan de vuelta — minimizar la ventana).
-3. Cuando esté confirmado: desconectar el auto-deploy de Railway y borrar/pausar los servicios para frenar el consumo.
-4. Programar backup diario de Postgres: cron del usuario `claude` con `pg_dump` al disco (y opcional: subirlo al bucket R2 existente).
+1. ✅ Usuario actualiza la URL base del API en la app Expo/React Native a `https://$DOMAIN/api` y confirma que el backend funciona bien con el nuevo despliegue.
+2. ✅ Auto-deploy de Railway pausado manualmente por el usuario en su dashboard (Settings del servicio → Source). El servicio y su Postgres siguen vivos como fallback frío.
+3. ⏳ Pendiente: pausar o borrar los servicios de Railway (app + Postgres) para frenar el consumo, una vez pase suficiente tiempo confirmando estabilidad en el VPS.
+4. ✅ Backup diario de Postgres programado: cron del usuario `claude` en el VPS con `pg_dump` al disco (`~/backups/daily-backup.sh`, 3am, retiene 7 días).
 
 ## Riesgos y mitigaciones
 

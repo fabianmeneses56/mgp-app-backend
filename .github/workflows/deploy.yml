@@ -31,6 +31,9 @@ jobs:
       - name: Build
         run: yarn build
 
+      - name: Test
+        run: yarn test
+
   deploy:
     needs: ci
     if: github.event_name != 'pull_request'

@@ -11,9 +11,13 @@ import { WeightHistory } from 'src/weight-history/entities/weight-history.entity
 import { WeightUnit } from './enums/weight-unit.enum';
 import { CategoriesService } from 'src/categories/categories.service';
 import { CloudflareR2Service } from 'src/cloudflare-r2/cloudflare-r2.service';
-import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { User } from 'src/auth/entities/user.entity';
 import { Category } from 'src/categories/entities/category.entity';
+import {
+  EXERCISE_IMAGE_ORPHANED,
+  ExerciseImageOrphanedEvent,
+} from './events/exercise-image-orphaned.event';
 
 describe('ExercisesService', () => {
   let service: ExercisesService;
@@ -38,9 +42,15 @@ describe('ExercisesService', () => {
     deleteFile: jest.fn(),
   };
 
-  const configService = {
-    get: jest.fn(),
+  const eventEmitter = {
+    emit: jest.fn(),
   };
+
+  const expectOrphanedEmit = (imageUrl: string) =>
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      EXERCISE_IMAGE_ORPHANED,
+      new ExerciseImageOrphanedEvent(imageUrl),
+    );
 
   const historyRepositoryInTx = {
     create: jest.fn(),
@@ -88,7 +98,7 @@ describe('ExercisesService', () => {
         },
         { provide: CategoriesService, useValue: categoriesService },
         { provide: CloudflareR2Service, useValue: cloudflareR2Service },
-        { provide: ConfigService, useValue: configService },
+        { provide: EventEmitter2, useValue: eventEmitter },
         { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
@@ -192,7 +202,7 @@ describe('ExercisesService', () => {
       expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
     });
 
-    it('when save fails: rolls back the transaction, deletes the uploaded key and throws InternalServerErrorException', async () => {
+    it('when save fails: rolls back the transaction, emits the orphaned-image event for the uploaded image and throws InternalServerErrorException', async () => {
       const image = {
         buffer: Buffer.from('fake'),
         mimetype: 'image/png',
@@ -208,9 +218,7 @@ describe('ExercisesService', () => {
       ).rejects.toBeInstanceOf(InternalServerErrorException);
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
-      const uploadedKey = cloudflareR2Service.uploadFile.mock
-        .calls[0][0] as string;
-      expect(cloudflareR2Service.deleteFile).toHaveBeenCalledWith(uploadedKey);
+      expectOrphanedEmit('https://public-url/exercises/some-uuid.png');
     });
 
     it('throws BadRequestException on a unique-violation error (code 23505)', async () => {
@@ -321,13 +329,12 @@ describe('ExercisesService', () => {
       expect(historyRepositoryInTx.save).toHaveBeenCalled();
     });
 
-    it('a new image over a previous one: uploads the new one and deletes the previous one using the key extracted via CLOUDFLARE_R2_PUBLIC_URL', async () => {
+    it('a new image over a previous one: uploads the new one and emits the orphaned-image event for the previous one', async () => {
       const withPreviousImage = {
         ...currentExercise,
         imageUrl: 'https://public-url/exercises/old-key.png',
       };
       exerciseRepository.findOne.mockResolvedValue(withPreviousImage);
-      configService.get.mockReturnValue('https://public-url');
       cloudflareR2Service.uploadFile.mockResolvedValue(
         'https://public-url/exercises/new-key.png',
       );
@@ -344,9 +351,7 @@ describe('ExercisesService', () => {
         image.buffer,
         image.mimetype,
       );
-      expect(cloudflareR2Service.deleteFile).toHaveBeenCalledWith(
-        'exercises/old-key.png',
-      );
+      expectOrphanedEmit('https://public-url/exercises/old-key.png');
     });
 
     it('throws NotFoundException when preload returns undefined', async () => {
@@ -357,13 +362,12 @@ describe('ExercisesService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
-    it('when save fails: rolls back, deletes the new image and does not touch the previous one', async () => {
+    it('when save fails: rolls back, emits the orphaned-image event for the new image only and leaves the previous one alone', async () => {
       const withPreviousImage = {
         ...currentExercise,
         imageUrl: 'https://public-url/exercises/old-key.png',
       };
       exerciseRepository.findOne.mockResolvedValue(withPreviousImage);
-      configService.get.mockReturnValue('https://public-url');
       cloudflareR2Service.uploadFile.mockResolvedValue(
         'https://public-url/exercises/new-key.png',
       );
@@ -379,33 +383,26 @@ describe('ExercisesService', () => {
       ).rejects.toBeInstanceOf(InternalServerErrorException);
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
-      const uploadedKey = cloudflareR2Service.uploadFile.mock
-        .calls[0][0] as string;
-      expect(cloudflareR2Service.deleteFile).toHaveBeenCalledWith(uploadedKey);
-      expect(cloudflareR2Service.deleteFile).not.toHaveBeenCalledWith(
-        'exercises/old-key.png',
-      );
+      expectOrphanedEmit('https://public-url/exercises/new-key.png');
+      expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('remove', () => {
-    it('removes the exercise and its R2 object', async () => {
+    it('removes the exercise and emits the orphaned-image event for its R2 object', async () => {
       const exercise = {
         id: 'e4b1a2c3-2222-4a11-8b11-abcdef123456',
         imageUrl: 'https://public-url/exercises/old-key.png',
       };
       exerciseRepository.findOne.mockResolvedValue(exercise);
-      configService.get.mockReturnValue('https://public-url');
 
       await service.remove(exercise.id, user);
 
       expect(exerciseRepository.remove).toHaveBeenCalledWith(exercise);
-      expect(cloudflareR2Service.deleteFile).toHaveBeenCalledWith(
-        'exercises/old-key.png',
-      );
+      expectOrphanedEmit('https://public-url/exercises/old-key.png');
     });
 
-    it('does not call deleteFile when the exercise has no imageUrl', async () => {
+    it('does not emit when the exercise has no imageUrl', async () => {
       const exercise = {
         id: 'e4b1a2c3-2222-4a11-8b11-abcdef123456',
         imageUrl: null,
@@ -414,7 +411,7 @@ describe('ExercisesService', () => {
 
       await service.remove(exercise.id, user);
 
-      expect(cloudflareR2Service.deleteFile).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
   });
 });

@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
@@ -19,6 +19,10 @@ import { User } from 'src/auth/entities/user.entity';
 import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
 import { CloudflareR2Service } from 'src/cloudflare-r2/cloudflare-r2.service';
 import { CategoriesService } from 'src/categories/categories.service';
+import {
+  EXERCISE_IMAGE_ORPHANED,
+  ExerciseImageOrphanedEvent,
+} from './events/exercise-image-orphaned.event';
 
 @Injectable()
 export class ExercisesService {
@@ -33,7 +37,7 @@ export class ExercisesService {
 
     private readonly cloudflareR2Service: CloudflareR2Service,
 
-    private readonly configService: ConfigService,
+    private readonly eventEmitter: EventEmitter2,
 
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -45,8 +49,6 @@ export class ExercisesService {
     user: User,
     image?: Express.Multer.File,
   ) {
-    let key: string | undefined;
-
     const category = await this.categoriesService.findOneByUser(
       createExerciseDto.category,
       user,
@@ -54,9 +56,8 @@ export class ExercisesService {
 
     let imageUrl: string | null = null;
     if (image) {
-      key = this.buildImageKey(image);
       imageUrl = await this.cloudflareR2Service.uploadFile(
-        key,
+        this.buildImageKey(image),
         image.buffer,
         image.mimetype,
       );
@@ -88,7 +89,7 @@ export class ExercisesService {
       if (queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction();
       }
-      if (key) await this.cloudflareR2Service.deleteFile(key);
+      if (imageUrl) this.emitImageOrphaned(imageUrl);
       this.handleDBExceptions(error);
     } finally {
       await queryRunner.release();
@@ -143,16 +144,16 @@ export class ExercisesService {
       );
     }
 
-    let newImageKey: string | undefined;
+    let newImageUrl: string | null = null;
     let imageUrl = currentExercise.imageUrl;
 
     if (image) {
-      newImageKey = this.buildImageKey(image);
-      imageUrl = await this.cloudflareR2Service.uploadFile(
-        newImageKey,
+      newImageUrl = await this.cloudflareR2Service.uploadFile(
+        this.buildImageKey(image),
         image.buffer,
         image.mimetype,
       );
+      imageUrl = newImageUrl;
     }
 
     const exercise = await this.exerciseRepository.preload({
@@ -190,16 +191,14 @@ export class ExercisesService {
       if (queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction();
       }
-      if (newImageKey) await this.cloudflareR2Service.deleteFile(newImageKey);
+      if (newImageUrl) this.emitImageOrphaned(newImageUrl);
       this.handleDBExceptions(error);
     } finally {
       await queryRunner.release();
     }
 
-    if (newImageKey && currentExercise.imageUrl) {
-      await this.cloudflareR2Service.deleteFile(
-        this.extractKeyFromUrl(currentExercise.imageUrl),
-      );
+    if (newImageUrl && currentExercise.imageUrl) {
+      this.emitImageOrphaned(currentExercise.imageUrl);
     }
 
     return this.findOne(id, user);
@@ -210,11 +209,7 @@ export class ExercisesService {
 
     await this.exerciseRepository.remove(exercise);
 
-    if (exercise.imageUrl) {
-      await this.cloudflareR2Service.deleteFile(
-        this.extractKeyFromUrl(exercise.imageUrl),
-      );
-    }
+    if (exercise.imageUrl) this.emitImageOrphaned(exercise.imageUrl);
   }
 
   private handleDBExceptions(error: any) {
@@ -250,12 +245,11 @@ export class ExercisesService {
     return `exercises/${randomUUID()}${extname(image.originalname)}`;
   }
 
-  private extractKeyFromUrl(imageUrl: string) {
-    const publicUrl = this.configService.get<string>(
-      'CLOUDFLARE_R2_PUBLIC_URL',
+  private emitImageOrphaned(imageUrl: string) {
+    this.eventEmitter.emit(
+      EXERCISE_IMAGE_ORPHANED,
+      new ExerciseImageOrphanedEvent(imageUrl),
     );
-
-    return imageUrl.replace(`${publicUrl}/`, '');
   }
 }
 

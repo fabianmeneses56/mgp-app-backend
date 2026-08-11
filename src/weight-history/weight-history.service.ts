@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { isUUID } from 'class-validator';
@@ -12,6 +13,10 @@ import { Exercise } from 'src/exercises/entities/exercise.entity';
 import { WeightHistory } from './entities/weight-history.entity';
 import { CreateWeightHistoryDto } from './dto/create-weight-history.dto';
 import { UpdateWeightHistoryDto } from './dto/update-weight-history.dto';
+import {
+  WEIGHT_HISTORY_LATEST_CHANGED,
+  WeightHistoryLatestChangedEvent,
+} from './events/weight-history-latest-changed.event';
 
 @Injectable()
 export class WeightHistoryService {
@@ -19,8 +24,12 @@ export class WeightHistoryService {
     @InjectRepository(WeightHistory)
     private readonly weightHistoryRepository: Repository<WeightHistory>,
 
+    // Solo lectura: valida la pertenencia del ejercicio al usuario. Las
+    // escrituras sobre `exercises` viven en su propio módulo.
     @InjectRepository(Exercise)
     private readonly exerciseRepository: Repository<Exercise>,
+
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(
@@ -39,7 +48,7 @@ export class WeightHistoryService {
     });
 
     await this.weightHistoryRepository.save(entry);
-    await this.syncExerciseWeight(exerciseId);
+    await this.publishLatestWeight(exerciseId);
 
     return entry;
   }
@@ -73,7 +82,7 @@ export class WeightHistoryService {
     if (dto.date !== undefined) entry.date = new Date(dto.date);
 
     await this.weightHistoryRepository.save(entry);
-    await this.syncExerciseWeight(exerciseId);
+    await this.publishLatestWeight(exerciseId);
 
     return entry;
   }
@@ -87,12 +96,12 @@ export class WeightHistoryService {
     const entry = await this.getEntryForExercise(entryId, exerciseId);
 
     await this.weightHistoryRepository.remove(entry);
-    await this.syncExerciseWeight(exerciseId);
+    await this.publishLatestWeight(exerciseId);
 
     return entry;
   }
 
-  private async syncExerciseWeight(exerciseId: string): Promise<void> {
+  private async publishLatestWeight(exerciseId: string): Promise<void> {
     const latest = await this.weightHistoryRepository.findOne({
       where: { exercise: { id: exerciseId } },
       order: { date: 'DESC' },
@@ -100,10 +109,16 @@ export class WeightHistoryService {
 
     if (!latest) return;
 
-    await this.exerciseRepository.update(exerciseId, {
-      weightGrams: latest.weightGrams,
-      weightUnit: latest.weightUnit,
-    });
+    // emitAsync (no emit): los listeners se esperan y sus errores se propagan,
+    // así que la respuesta no confirma un cambio que quedó a medias.
+    await this.eventEmitter.emitAsync(
+      WEIGHT_HISTORY_LATEST_CHANGED,
+      new WeightHistoryLatestChangedEvent(
+        exerciseId,
+        latest.weightGrams,
+        latest.weightUnit,
+      ),
+    );
   }
 
   private async getOwnedExercise(

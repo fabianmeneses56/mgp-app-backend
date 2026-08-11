@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 import { AuthModule } from './auth/auth.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -14,6 +15,8 @@ import { buildDatabaseConfig } from './config/database.factory';
 @Module({
   imports: [
     ConfigModule.forRoot(),
+
+    EventEmitterModule.forRoot(),
 
     ThrottlerModule.forRoot([
       {

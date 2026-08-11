@@ -6,6 +6,11 @@ import { WeightHistory } from './entities/weight-history.entity';
 import { Exercise } from 'src/exercises/entities/exercise.entity';
 import { WeightUnit } from 'src/exercises/enums/weight-unit.enum';
 import { User } from 'src/auth/entities/user.entity';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  WEIGHT_HISTORY_LATEST_CHANGED,
+  WeightHistoryLatestChangedEvent,
+} from './events/weight-history-latest-changed.event';
 
 describe('WeightHistoryService', () => {
   let service: WeightHistoryService;
@@ -20,8 +25,21 @@ describe('WeightHistoryService', () => {
 
   const exerciseRepository = {
     findOne: jest.fn(),
-    update: jest.fn(),
   };
+
+  const eventEmitter = {
+    emitAsync: jest.fn(),
+  };
+
+  const expectLatestChangedEmit = (
+    exerciseId: string,
+    weightGrams: number,
+    weightUnit: WeightUnit,
+  ) =>
+    expect(eventEmitter.emitAsync).toHaveBeenCalledWith(
+      WEIGHT_HISTORY_LATEST_CHANGED,
+      new WeightHistoryLatestChangedEvent(exerciseId, weightGrams, weightUnit),
+    );
 
   const user = { id: 'f4b1a2c3-1111-4a11-8b11-abcdef123456' } as User;
   const exerciseId = 'e4b1a2c3-2222-4a11-8b11-abcdef123456';
@@ -41,6 +59,7 @@ describe('WeightHistoryService', () => {
           provide: getRepositoryToken(Exercise),
           useValue: exerciseRepository,
         },
+        { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile();
 
@@ -48,7 +67,7 @@ describe('WeightHistoryService', () => {
   });
 
   describe('create', () => {
-    it('converts weight to grams, defaults an absent note to null and syncs the exercise weight', async () => {
+    it('converts weight to grams, defaults an absent note to null and publishes the latest weight', async () => {
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
       weightHistoryRepository.create.mockImplementation(
         (data: Partial<WeightHistory>) => ({ ...data }),
@@ -74,10 +93,11 @@ describe('WeightHistoryService', () => {
         date: expect.any(Date) as Date,
         exercise: ownedExercise,
       });
-      expect(exerciseRepository.update).toHaveBeenCalledWith(exerciseId, {
-        weightGrams: latest.weightGrams,
-        weightUnit: latest.weightUnit,
-      });
+      expectLatestChangedEmit(
+        exerciseId,
+        latest.weightGrams,
+        latest.weightUnit,
+      );
       expect(result.note).toBeNull();
     });
 
@@ -243,7 +263,7 @@ describe('WeightHistoryService', () => {
   describe('remove', () => {
     const entryId = 'aaaaaaaa-3333-4a11-8b11-abcdef123456';
 
-    it('removes the entry and syncs the exercise weight', async () => {
+    it('removes the entry and publishes the weight of the newest remaining one', async () => {
       const entry = {
         id: entryId,
         weightGrams: 1000,
@@ -259,13 +279,14 @@ describe('WeightHistoryService', () => {
       await service.remove(exerciseId, entryId, user);
 
       expect(weightHistoryRepository.remove).toHaveBeenCalledWith(entry);
-      expect(exerciseRepository.update).toHaveBeenCalledWith(exerciseId, {
-        weightGrams: remaining.weightGrams,
-        weightUnit: remaining.weightUnit,
-      });
+      expectLatestChangedEmit(
+        exerciseId,
+        remaining.weightGrams,
+        remaining.weightUnit,
+      );
     });
 
-    it('known bug: does not call exerciseRepository.update when no entry remains after removing the last one', async () => {
+    it('known bug: emits nothing when no entry remains after removing the last one, so the exercise keeps the stale weight', async () => {
       const entry = {
         id: entryId,
         weightGrams: 1000,
@@ -280,7 +301,7 @@ describe('WeightHistoryService', () => {
       await service.remove(exerciseId, entryId, user);
 
       expect(weightHistoryRepository.remove).toHaveBeenCalledWith(entry);
-      expect(exerciseRepository.update).not.toHaveBeenCalled();
+      expect(eventEmitter.emitAsync).not.toHaveBeenCalled();
     });
   });
 });

@@ -11,6 +11,14 @@ import {
   WEIGHT_HISTORY_LATEST_CHANGED,
   WeightHistoryLatestChangedEvent,
 } from './events/weight-history-latest-changed.event';
+import {
+  ActivityAction,
+  ActivityType,
+} from 'src/activity/entities/activity-log.entity';
+import {
+  ACTIVITY_RECORDED,
+  ActivityRecordedEvent,
+} from 'src/activity/events/activity-recorded.event';
 
 describe('WeightHistoryService', () => {
   let service: WeightHistoryService;
@@ -28,6 +36,7 @@ describe('WeightHistoryService', () => {
   };
 
   const eventEmitter = {
+    emit: jest.fn(),
     emitAsync: jest.fn(),
   };
 
@@ -43,7 +52,7 @@ describe('WeightHistoryService', () => {
 
   const user = { id: 'f4b1a2c3-1111-4a11-8b11-abcdef123456' } as User;
   const exerciseId = 'e4b1a2c3-2222-4a11-8b11-abcdef123456';
-  const ownedExercise = { id: exerciseId } as Exercise;
+  const ownedExercise = { id: exerciseId, name: 'Bench Press' } as Exercise;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -101,11 +110,44 @@ describe('WeightHistoryService', () => {
       expect(result.note).toBeNull();
     });
 
+    it('emits ACTIVITY_RECORDED with type WEIGHT_HISTORY and action CREATED after saving', async () => {
+      exerciseRepository.findOne.mockResolvedValue(ownedExercise);
+      weightHistoryRepository.create.mockImplementation(
+        (data: Partial<WeightHistory>) => ({ ...data }),
+      );
+      weightHistoryRepository.save.mockImplementation(
+        (entry: Partial<WeightHistory>) => Promise.resolve(entry),
+      );
+      weightHistoryRepository.findOne.mockResolvedValue(null);
+
+      const dto = {
+        weight: 2.5,
+        weightUnit: WeightUnit.KILOGRAM,
+        date: '2026-01-01',
+      };
+
+      const result = await service.create(exerciseId, dto as any, user);
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        ACTIVITY_RECORDED,
+        new ActivityRecordedEvent(
+          user.id,
+          ActivityType.WEIGHT_HISTORY,
+          ActivityAction.CREATED,
+          result.id,
+          ownedExercise.name,
+          result.weightGrams,
+          result.weightUnit,
+        ),
+      );
+    });
+
     it('throws NotFoundException when exerciseId is not a UUID', async () => {
       await expect(
         service.create('not-a-uuid', {} as any, user),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(exerciseRepository.findOne).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException when the exercise does not exist or belongs to another user', async () => {
@@ -114,6 +156,7 @@ describe('WeightHistoryService', () => {
       await expect(
         service.create(exerciseId, {} as any, user),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
   });
 
@@ -164,6 +207,44 @@ describe('WeightHistoryService', () => {
 
       expect(result.weightGrams).toBe(3000);
       expect(result.weightUnit).toBe(WeightUnit.KILOGRAM);
+    });
+
+    it('emits ACTIVITY_RECORDED with type WEIGHT_HISTORY and action UPDATED with the exercise name and final weight', async () => {
+      const entry = {
+        id: entryId,
+        weightGrams: 1000,
+        weightUnit: WeightUnit.KILOGRAM,
+        note: null,
+        date: new Date('2020-01-01'),
+        exercise: { id: exerciseId },
+      };
+      exerciseRepository.findOne.mockResolvedValue(ownedExercise);
+      weightHistoryRepository.findOne
+        .mockResolvedValueOnce(entry)
+        .mockResolvedValueOnce(entry);
+      weightHistoryRepository.save.mockImplementation((e) =>
+        Promise.resolve(e),
+      );
+
+      const result = await service.update(
+        exerciseId,
+        entryId,
+        { weight: 3 } as any,
+        user,
+      );
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        ACTIVITY_RECORDED,
+        new ActivityRecordedEvent(
+          user.id,
+          ActivityType.WEIGHT_HISTORY,
+          ActivityAction.UPDATED,
+          result.id,
+          ownedExercise.name,
+          result.weightGrams,
+          result.weightUnit,
+        ),
+      );
     });
 
     it('uses the new weightUnit when weight and weightUnit are both provided', async () => {
@@ -257,6 +338,7 @@ describe('WeightHistoryService', () => {
       await expect(
         service.update(exerciseId, entryId, { weight: 3 } as any, user),
       ).rejects.toBeInstanceOf(NotFoundException);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
   });
 

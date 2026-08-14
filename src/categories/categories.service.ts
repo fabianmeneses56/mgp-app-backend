@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { User } from 'src/auth/entities/user.entity';
@@ -11,12 +12,22 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Category } from './entities/category.entity';
 import { Repository } from 'typeorm';
 import { validate as isUUID } from 'uuid';
+import {
+  ActivityAction,
+  ActivityType,
+} from 'src/activity/entities/activity-log.entity';
+import {
+  ACTIVITY_RECORDED,
+  ActivityRecordedEvent,
+} from 'src/activity/events/activity-recorded.event';
 
 @Injectable()
 export class CategoriesService {
   constructor(
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(createCategoryDto: CreateCategoryDto, user: User) {
@@ -27,6 +38,7 @@ export class CategoriesService {
       });
 
       await this.categoryRepository.save(category);
+      this.emitActivityRecorded(category, ActivityAction.CREATED, user);
       return { ...category };
     } catch (error) {
       this.handleDBExceptions(error);
@@ -88,6 +100,7 @@ export class CategoriesService {
       throw new NotFoundException(`Category with id: ${id} not found`);
 
     await this.categoryRepository.save(category);
+    this.emitActivityRecorded(category, ActivityAction.UPDATED, user);
 
     return this.findOne(id);
   }
@@ -95,6 +108,23 @@ export class CategoriesService {
   async remove(id: string, user: User) {
     const category = await this.findOneByUser(id, user);
     await this.categoryRepository.remove(category);
+  }
+
+  private emitActivityRecorded(
+    category: Category,
+    action: ActivityAction,
+    user: User,
+  ) {
+    this.eventEmitter.emit(
+      ACTIVITY_RECORDED,
+      new ActivityRecordedEvent(
+        user.id,
+        ActivityType.CATEGORY,
+        action,
+        category.id,
+        category.name,
+      ),
+    );
   }
 
   private handleDBExceptions(error: any) {

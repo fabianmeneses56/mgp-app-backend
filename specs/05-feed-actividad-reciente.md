@@ -1,6 +1,6 @@
 # Spec 05 — Feed de actividad reciente
 
-- **Estado:** Draft
+- **Estado:** Approved
 - **Dependencias:** spec 01 (weight-history), patrón de eventos ya implementado
   (`@nestjs/event-emitter`, PR #7)
 - **Fecha:** 2026-08-14

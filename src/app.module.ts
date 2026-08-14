@@ -10,6 +10,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { ExercisesModule } from './exercises/exercises.module';
 import { WeightHistoryModule } from './weight-history/weight-history.module';
 import { CloudflareR2Module } from './cloudflare-r2/cloudflare-r2.module';
+import { ActivityModule } from './activity/activity.module';
 import { buildDatabaseConfig } from './config/database.factory';
 
 @Module({
@@ -42,6 +43,8 @@ import { buildDatabaseConfig } from './config/database.factory';
     ExercisesModule,
 
     WeightHistoryModule,
+
+    ActivityModule,
   ],
   providers: [
     {

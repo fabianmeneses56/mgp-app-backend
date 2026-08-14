@@ -5,9 +5,18 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CategoriesService } from './categories.service';
 import { Category } from './entities/category.entity';
 import { User } from 'src/auth/entities/user.entity';
+import {
+  ActivityAction,
+  ActivityType,
+} from 'src/activity/entities/activity-log.entity';
+import {
+  ACTIVITY_RECORDED,
+  ActivityRecordedEvent,
+} from 'src/activity/events/activity-recorded.event';
 
 describe('CategoriesService', () => {
   let service: CategoriesService;
@@ -19,6 +28,10 @@ describe('CategoriesService', () => {
     findOneBy: jest.fn(),
     preload: jest.fn(),
     remove: jest.fn(),
+  };
+
+  const eventEmitter = {
+    emit: jest.fn(),
   };
 
   const user = { id: 'f4b1a2c3-1111-4a11-8b11-abcdef123456' } as User;
@@ -33,6 +46,7 @@ describe('CategoriesService', () => {
           provide: getRepositoryToken(Category),
           useValue: categoryRepository,
         },
+        { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile();
 
@@ -56,7 +70,27 @@ describe('CategoriesService', () => {
       expect(result).toEqual({ ...created });
     });
 
-    it('throws BadRequestException on a unique-violation error', async () => {
+    it('emits ACTIVITY_RECORDED with type CATEGORY and action CREATED after saving', async () => {
+      const dto = { name: 'Legs' };
+      const created = { id: 'cat-id', ...dto, user };
+      categoryRepository.create.mockReturnValue(created);
+      categoryRepository.save.mockResolvedValue(created);
+
+      await service.create(dto, user);
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        ACTIVITY_RECORDED,
+        new ActivityRecordedEvent(
+          user.id,
+          ActivityType.CATEGORY,
+          ActivityAction.CREATED,
+          created.id,
+          created.name,
+        ),
+      );
+    });
+
+    it('throws BadRequestException on a unique-violation error and does not emit', async () => {
       categoryRepository.create.mockReturnValue({});
       categoryRepository.save.mockRejectedValue({
         code: '23505',
@@ -66,15 +100,17 @@ describe('CategoriesService', () => {
       await expect(
         service.create({ name: 'Legs' }, user),
       ).rejects.toBeInstanceOf(BadRequestException);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
-    it('throws InternalServerErrorException on an unexpected error', async () => {
+    it('throws InternalServerErrorException on an unexpected error and does not emit', async () => {
       categoryRepository.create.mockReturnValue({});
       categoryRepository.save.mockRejectedValue(new Error('boom'));
 
       await expect(
         service.create({ name: 'Legs' }, user),
       ).rejects.toBeInstanceOf(InternalServerErrorException);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
   });
 
@@ -149,9 +185,10 @@ describe('CategoriesService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(categoryRepository.preload).not.toHaveBeenCalled();
       expect(categoryRepository.save).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
-    it('throws NotFoundException when preload returns undefined', async () => {
+    it('throws NotFoundException when preload returns undefined and does not emit', async () => {
       categoryRepository.findOne.mockResolvedValue({ id: 'cat-id' });
       categoryRepository.preload.mockResolvedValue(undefined);
 
@@ -159,6 +196,7 @@ describe('CategoriesService', () => {
         service.update('cat-id', { name: 'New' }, user),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(categoryRepository.save).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('saves and then returns findOne on the happy path', async () => {
@@ -174,6 +212,28 @@ describe('CategoriesService', () => {
 
       expect(categoryRepository.save).toHaveBeenCalledWith(preloaded);
       expect(result).toEqual(updated);
+    });
+
+    it('emits ACTIVITY_RECORDED with type CATEGORY and action UPDATED with the resultant name', async () => {
+      const id = 'f4b1a2c3-1111-4a11-8b11-abcdef123456';
+      const preloaded = { id, name: 'New' };
+      categoryRepository.findOne.mockResolvedValue({ id });
+      categoryRepository.preload.mockResolvedValue(preloaded);
+      categoryRepository.save.mockResolvedValue(preloaded);
+      categoryRepository.findOneBy.mockResolvedValue(preloaded);
+
+      await service.update(id, { name: 'New' }, user);
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        ACTIVITY_RECORDED,
+        new ActivityRecordedEvent(
+          user.id,
+          ActivityType.CATEGORY,
+          ActivityAction.UPDATED,
+          id,
+          'New',
+        ),
+      );
     });
   });
 

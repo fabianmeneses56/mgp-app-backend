@@ -17,6 +17,14 @@ import {
   WEIGHT_HISTORY_LATEST_CHANGED,
   WeightHistoryLatestChangedEvent,
 } from './events/weight-history-latest-changed.event';
+import {
+  ActivityAction,
+  ActivityType,
+} from 'src/activity/entities/activity-log.entity';
+import {
+  ACTIVITY_RECORDED,
+  ActivityRecordedEvent,
+} from 'src/activity/events/activity-recorded.event';
 
 @Injectable()
 export class WeightHistoryService {
@@ -48,6 +56,7 @@ export class WeightHistoryService {
     });
 
     await this.weightHistoryRepository.save(entry);
+    this.emitActivityRecorded(entry, exercise, ActivityAction.CREATED, user);
     await this.publishLatestWeight(exerciseId);
 
     return entry;
@@ -68,7 +77,7 @@ export class WeightHistoryService {
     dto: UpdateWeightHistoryDto,
     user: User,
   ): Promise<WeightHistory> {
-    await this.getOwnedExercise(exerciseId, user);
+    const exercise = await this.getOwnedExercise(exerciseId, user);
     const entry = await this.getEntryForExercise(entryId, exerciseId);
 
     if (dto.weight !== undefined) {
@@ -82,6 +91,7 @@ export class WeightHistoryService {
     if (dto.date !== undefined) entry.date = new Date(dto.date);
 
     await this.weightHistoryRepository.save(entry);
+    this.emitActivityRecorded(entry, exercise, ActivityAction.UPDATED, user);
     await this.publishLatestWeight(exerciseId);
 
     return entry;
@@ -117,6 +127,26 @@ export class WeightHistoryService {
         exerciseId,
         latest.weightGrams,
         latest.weightUnit,
+      ),
+    );
+  }
+
+  private emitActivityRecorded(
+    entry: WeightHistory,
+    exercise: Exercise,
+    action: ActivityAction,
+    user: User,
+  ) {
+    this.eventEmitter.emit(
+      ACTIVITY_RECORDED,
+      new ActivityRecordedEvent(
+        user.id,
+        ActivityType.WEIGHT_HISTORY,
+        action,
+        entry.id,
+        exercise.name,
+        entry.weightGrams,
+        entry.weightUnit,
       ),
     );
   }

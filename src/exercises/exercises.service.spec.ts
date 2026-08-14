@@ -18,6 +18,14 @@ import {
   EXERCISE_IMAGE_ORPHANED,
   ExerciseImageOrphanedEvent,
 } from './events/exercise-image-orphaned.event';
+import {
+  ActivityAction,
+  ActivityType,
+} from 'src/activity/entities/activity-log.entity';
+import {
+  ACTIVITY_RECORDED,
+  ActivityRecordedEvent,
+} from 'src/activity/events/activity-recorded.event';
 
 describe('ExercisesService', () => {
   let service: ExercisesService;
@@ -160,6 +168,21 @@ describe('ExercisesService', () => {
       });
     });
 
+    it('emits ACTIVITY_RECORDED with type EXERCISE and action CREATED after committing', async () => {
+      const result = await service.create(dto as any, user);
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        ACTIVITY_RECORDED,
+        new ActivityRecordedEvent(
+          user.id,
+          ActivityType.EXERCISE,
+          ActivityAction.CREATED,
+          (result as Exercise).id,
+          (result as Exercise).name,
+        ),
+      );
+    });
+
     it('with an image: uploads it to R2 with a key formatted as exercises/<uuid><ext> using the extension from originalname', async () => {
       const image = {
         buffer: Buffer.from('fake'),
@@ -219,14 +242,19 @@ describe('ExercisesService', () => {
 
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
       expectOrphanedEmit('https://public-url/exercises/some-uuid.png');
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        ACTIVITY_RECORDED,
+        expect.anything(),
+      );
     });
 
-    it('throws BadRequestException on a unique-violation error (code 23505)', async () => {
+    it('throws BadRequestException on a unique-violation error (code 23505) and does not emit activity', async () => {
       manager.save.mockRejectedValue({ code: '23505', detail: 'dup' });
 
       await expect(service.create(dto as any, user)).rejects.toBeInstanceOf(
         BadRequestException,
       );
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('calls queryRunner.release() on both the happy path and the error path', async () => {
@@ -312,6 +340,7 @@ describe('ExercisesService', () => {
       await expect(
         service.update(id, { weightUnit: WeightUnit.POUND } as any, user),
       ).rejects.toBeInstanceOf(BadRequestException);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('does not record a WeightHistory entry when weight is not provided', async () => {
@@ -327,6 +356,21 @@ describe('ExercisesService', () => {
         expect.objectContaining({ weightGrams: 65000 }),
       );
       expect(historyRepositoryInTx.save).toHaveBeenCalled();
+    });
+
+    it('emits ACTIVITY_RECORDED with type EXERCISE and action UPDATED with the resultant name', async () => {
+      await service.update(id, { name: 'New name' } as any, user);
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        ACTIVITY_RECORDED,
+        new ActivityRecordedEvent(
+          user.id,
+          ActivityType.EXERCISE,
+          ActivityAction.UPDATED,
+          id,
+          'New name',
+        ),
+      );
     });
 
     it('a new image over a previous one: uploads the new one and emits the orphaned-image event for the previous one', async () => {
@@ -360,6 +404,7 @@ describe('ExercisesService', () => {
       await expect(
         service.update(id, { name: 'New name' } as any, user),
       ).rejects.toBeInstanceOf(NotFoundException);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('when save fails: rolls back, emits the orphaned-image event for the new image only and leaves the previous one alone', async () => {

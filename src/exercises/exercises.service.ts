@@ -23,6 +23,14 @@ import {
   EXERCISE_IMAGE_ORPHANED,
   ExerciseImageOrphanedEvent,
 } from './events/exercise-image-orphaned.event';
+import {
+  ActivityAction,
+  ActivityType,
+} from 'src/activity/entities/activity-log.entity';
+import {
+  ACTIVITY_RECORDED,
+  ActivityRecordedEvent,
+} from 'src/activity/events/activity-recorded.event';
 
 @Injectable()
 export class ExercisesService {
@@ -84,6 +92,7 @@ export class ExercisesService {
       await this.recordWeightHistory(exercise, queryRunner.manager);
 
       await queryRunner.commitTransaction();
+      this.emitActivityRecorded(exercise, ActivityAction.CREATED, user);
       return exercise;
     } catch (error) {
       if (queryRunner.isTransactionActive) {
@@ -197,6 +206,8 @@ export class ExercisesService {
       await queryRunner.release();
     }
 
+    this.emitActivityRecorded(exercise, ActivityAction.UPDATED, user);
+
     if (newImageUrl && currentExercise.imageUrl) {
       this.emitImageOrphaned(currentExercise.imageUrl);
     }
@@ -249,6 +260,23 @@ export class ExercisesService {
     this.eventEmitter.emit(
       EXERCISE_IMAGE_ORPHANED,
       new ExerciseImageOrphanedEvent(imageUrl),
+    );
+  }
+
+  private emitActivityRecorded(
+    exercise: Exercise,
+    action: ActivityAction,
+    user: User,
+  ) {
+    this.eventEmitter.emit(
+      ACTIVITY_RECORDED,
+      new ActivityRecordedEvent(
+        user.id,
+        ActivityType.EXERCISE,
+        action,
+        exercise.id,
+        exercise.name,
+      ),
     );
   }
 }

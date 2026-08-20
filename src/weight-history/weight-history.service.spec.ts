@@ -4,13 +4,10 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { WeightHistoryService } from './weight-history.service';
 import { WeightHistory } from './entities/weight-history.entity';
 import { Exercise } from 'src/exercises/entities/exercise.entity';
+import { ExerciseWeightRepository } from 'src/exercises/exercise-weight.repository';
 import { WeightUnit } from 'src/exercises/enums/weight-unit.enum';
 import { User } from 'src/auth/entities/user.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import {
-  WEIGHT_HISTORY_LATEST_CHANGED,
-  WeightHistoryLatestChangedEvent,
-} from './events/weight-history-latest-changed.event';
 import {
   ActivityAction,
   ActivityType,
@@ -24,31 +21,23 @@ describe('WeightHistoryService', () => {
   let service: WeightHistoryService;
 
   const weightHistoryRepository = {
-    create: jest.fn(),
-    save: jest.fn(),
     find: jest.fn(),
     findOne: jest.fn(),
-    remove: jest.fn(),
   };
 
   const exerciseRepository = {
     findOne: jest.fn(),
   };
 
-  const eventEmitter = {
-    emit: jest.fn(),
-    emitAsync: jest.fn(),
+  const exerciseWeightRepository = {
+    appendEntry: jest.fn(),
+    updateEntry: jest.fn(),
+    removeEntry: jest.fn(),
   };
 
-  const expectLatestChangedEmit = (
-    exerciseId: string,
-    weightGrams: number,
-    weightUnit: WeightUnit,
-  ) =>
-    expect(eventEmitter.emitAsync).toHaveBeenCalledWith(
-      WEIGHT_HISTORY_LATEST_CHANGED,
-      new WeightHistoryLatestChangedEvent(exerciseId, weightGrams, weightUnit),
-    );
+  const eventEmitter = {
+    emit: jest.fn(),
+  };
 
   const user = { id: 'f4b1a2c3-1111-4a11-8b11-abcdef123456' } as User;
   const exerciseId = 'e4b1a2c3-2222-4a11-8b11-abcdef123456';
@@ -68,6 +57,10 @@ describe('WeightHistoryService', () => {
           provide: getRepositoryToken(Exercise),
           useValue: exerciseRepository,
         },
+        {
+          provide: ExerciseWeightRepository,
+          useValue: exerciseWeightRepository,
+        },
         { provide: EventEmitter2, useValue: eventEmitter },
       ],
     }).compile();
@@ -76,16 +69,12 @@ describe('WeightHistoryService', () => {
   });
 
   describe('create', () => {
-    it('converts weight to grams, defaults an absent note to null and publishes the latest weight', async () => {
+    it('converts weight to grams, defaults an absent note to null and delegates to exerciseWeightRepository.appendEntry', async () => {
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.create.mockImplementation(
-        (data: Partial<WeightHistory>) => ({ ...data }),
+      exerciseWeightRepository.appendEntry.mockImplementation(
+        (_exerciseId: string, data: Partial<WeightHistory>) =>
+          Promise.resolve({ id: 'entry-id', ...data }),
       );
-      weightHistoryRepository.save.mockImplementation(
-        (entry: Partial<WeightHistory>) => Promise.resolve(entry),
-      );
-      const latest = { weightGrams: 2500, weightUnit: WeightUnit.KILOGRAM };
-      weightHistoryRepository.findOne.mockResolvedValue(latest);
 
       const dto = {
         weight: 2.5,
@@ -95,30 +84,25 @@ describe('WeightHistoryService', () => {
 
       const result = await service.create(exerciseId, dto as any, user);
 
-      expect(weightHistoryRepository.create).toHaveBeenCalledWith({
-        weightGrams: 2500,
-        weightUnit: WeightUnit.KILOGRAM,
-        note: null,
-        date: expect.any(Date) as Date,
-        exercise: ownedExercise,
-      });
-      expectLatestChangedEmit(
+      expect(exerciseWeightRepository.appendEntry).toHaveBeenCalledWith(
         exerciseId,
-        latest.weightGrams,
-        latest.weightUnit,
+        {
+          weightGrams: 2500,
+          weightUnit: WeightUnit.KILOGRAM,
+          note: null,
+          date: expect.any(Date) as Date,
+          exercise: ownedExercise,
+        },
       );
       expect(result.note).toBeNull();
     });
 
-    it('emits ACTIVITY_RECORDED with type WEIGHT_HISTORY and action CREATED after saving', async () => {
+    it('emits ACTIVITY_RECORDED with type WEIGHT_HISTORY and action CREATED after appendEntry resolves', async () => {
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.create.mockImplementation(
-        (data: Partial<WeightHistory>) => ({ ...data }),
+      exerciseWeightRepository.appendEntry.mockImplementation(
+        (_exerciseId: string, data: Partial<WeightHistory>) =>
+          Promise.resolve({ id: 'entry-id', ...data }),
       );
-      weightHistoryRepository.save.mockImplementation(
-        (entry: Partial<WeightHistory>) => Promise.resolve(entry),
-      );
-      weightHistoryRepository.findOne.mockResolvedValue(null);
 
       const dto = {
         weight: 2.5,
@@ -181,6 +165,12 @@ describe('WeightHistoryService', () => {
   describe('update', () => {
     const entryId = 'aaaaaaaa-3333-4a11-8b11-abcdef123456';
 
+    beforeEach(() => {
+      exerciseWeightRepository.updateEntry.mockImplementation(
+        (entry: WeightHistory) => Promise.resolve(entry),
+      );
+    });
+
     it('uses the entry current weightUnit when only weight is provided', async () => {
       const entry = {
         id: entryId,
@@ -191,12 +181,7 @@ describe('WeightHistoryService', () => {
         exercise: { id: exerciseId },
       };
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.findOne
-        .mockResolvedValueOnce(entry)
-        .mockResolvedValueOnce(entry);
-      weightHistoryRepository.save.mockImplementation((e) =>
-        Promise.resolve(e),
-      );
+      weightHistoryRepository.findOne.mockResolvedValue(entry);
 
       const result = await service.update(
         exerciseId,
@@ -207,6 +192,10 @@ describe('WeightHistoryService', () => {
 
       expect(result.weightGrams).toBe(3000);
       expect(result.weightUnit).toBe(WeightUnit.KILOGRAM);
+      expect(exerciseWeightRepository.updateEntry).toHaveBeenCalledWith(
+        entry,
+        exerciseId,
+      );
     });
 
     it('emits ACTIVITY_RECORDED with type WEIGHT_HISTORY and action UPDATED with the exercise name and final weight', async () => {
@@ -219,12 +208,7 @@ describe('WeightHistoryService', () => {
         exercise: { id: exerciseId },
       };
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.findOne
-        .mockResolvedValueOnce(entry)
-        .mockResolvedValueOnce(entry);
-      weightHistoryRepository.save.mockImplementation((e) =>
-        Promise.resolve(e),
-      );
+      weightHistoryRepository.findOne.mockResolvedValue(entry);
 
       const result = await service.update(
         exerciseId,
@@ -257,12 +241,7 @@ describe('WeightHistoryService', () => {
         exercise: { id: exerciseId },
       };
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.findOne
-        .mockResolvedValueOnce(entry)
-        .mockResolvedValueOnce(entry);
-      weightHistoryRepository.save.mockImplementation((e) =>
-        Promise.resolve(e),
-      );
+      weightHistoryRepository.findOne.mockResolvedValue(entry);
 
       const result = await service.update(
         exerciseId,
@@ -285,12 +264,7 @@ describe('WeightHistoryService', () => {
         exercise: { id: exerciseId },
       };
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.findOne
-        .mockResolvedValueOnce(entry)
-        .mockResolvedValueOnce(entry);
-      weightHistoryRepository.save.mockImplementation((e) =>
-        Promise.resolve(e),
-      );
+      weightHistoryRepository.findOne.mockResolvedValue(entry);
 
       const result = await service.update(
         exerciseId,
@@ -313,12 +287,7 @@ describe('WeightHistoryService', () => {
         exercise: { id: exerciseId },
       };
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.findOne
-        .mockResolvedValueOnce(entry)
-        .mockResolvedValueOnce(entry);
-      weightHistoryRepository.save.mockImplementation((e) =>
-        Promise.resolve(e),
-      );
+      weightHistoryRepository.findOne.mockResolvedValue(entry);
 
       const result = await service.update(
         exerciseId,
@@ -339,51 +308,40 @@ describe('WeightHistoryService', () => {
         service.update(exerciseId, entryId, { weight: 3 } as any, user),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(exerciseWeightRepository.updateEntry).not.toHaveBeenCalled();
     });
   });
 
   describe('remove', () => {
     const entryId = 'aaaaaaaa-3333-4a11-8b11-abcdef123456';
 
-    it('removes the entry and publishes the weight of the newest remaining one', async () => {
+    it('removes the entry via exerciseWeightRepository.removeEntry', async () => {
       const entry = {
         id: entryId,
         weightGrams: 1000,
         weightUnit: WeightUnit.KILOGRAM,
         exercise: { id: exerciseId },
       };
-      const remaining = { weightGrams: 500, weightUnit: WeightUnit.GRAM };
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.findOne
-        .mockResolvedValueOnce(entry)
-        .mockResolvedValueOnce(remaining);
+      weightHistoryRepository.findOne.mockResolvedValue(entry);
 
-      await service.remove(exerciseId, entryId, user);
+      const result = await service.remove(exerciseId, entryId, user);
 
-      expect(weightHistoryRepository.remove).toHaveBeenCalledWith(entry);
-      expectLatestChangedEmit(
+      expect(exerciseWeightRepository.removeEntry).toHaveBeenCalledWith(
+        entry,
         exerciseId,
-        remaining.weightGrams,
-        remaining.weightUnit,
       );
+      expect(result).toBe(entry);
     });
 
-    it('known bug: emits nothing when no entry remains after removing the last one, so the exercise keeps the stale weight', async () => {
-      const entry = {
-        id: entryId,
-        weightGrams: 1000,
-        weightUnit: WeightUnit.KILOGRAM,
-        exercise: { id: exerciseId },
-      };
+    it('throws NotFoundException when entryId does not belong to the exercise', async () => {
       exerciseRepository.findOne.mockResolvedValue(ownedExercise);
-      weightHistoryRepository.findOne
-        .mockResolvedValueOnce(entry)
-        .mockResolvedValueOnce(null);
+      weightHistoryRepository.findOne.mockResolvedValue(null);
 
-      await service.remove(exerciseId, entryId, user);
-
-      expect(weightHistoryRepository.remove).toHaveBeenCalledWith(entry);
-      expect(eventEmitter.emitAsync).not.toHaveBeenCalled();
+      await expect(
+        service.remove(exerciseId, entryId, user),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(exerciseWeightRepository.removeEntry).not.toHaveBeenCalled();
     });
   });
 });

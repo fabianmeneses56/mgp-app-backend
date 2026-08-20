@@ -12,11 +12,11 @@ import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { convertWeightToGrams } from './utils/convert-weight';
 import { Exercise } from './entities/exercise.entity';
-import { DataSource, EntityManager, Repository } from 'typeorm';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
 import { User } from 'src/auth/entities/user.entity';
-import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
+import { ExerciseWeightRepository } from './exercise-weight.repository';
 import { CloudflareR2Service } from 'src/cloudflare-r2/cloudflare-r2.service';
 import { CategoriesService } from 'src/categories/categories.service';
 import {
@@ -40,15 +40,11 @@ export class ExercisesService {
 
     private readonly categoriesService: CategoriesService,
 
-    @InjectRepository(WeightHistory)
-    private readonly weightHistoryRepository: Repository<WeightHistory>,
+    private readonly exerciseWeightRepository: ExerciseWeightRepository,
 
     private readonly cloudflareR2Service: CloudflareR2Service,
 
     private readonly eventEmitter: EventEmitter2,
-
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
   ) {}
 
   @LogExecutionTime()
@@ -71,13 +67,8 @@ export class ExercisesService {
       );
     }
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-
     try {
-      await queryRunner.startTransaction();
-
-      const exercise = queryRunner.manager.create(Exercise, {
+      const exercise = await this.exerciseWeightRepository.createExercise({
         name: createExerciseDto.name,
         weightGrams: convertWeightToGrams(
           createExerciseDto.weight,
@@ -87,21 +78,12 @@ export class ExercisesService {
         imageUrl,
         category,
       });
-      await queryRunner.manager.save(exercise);
 
-      await this.recordWeightHistory(exercise, queryRunner.manager);
-
-      await queryRunner.commitTransaction();
       this.emitActivityRecorded(exercise, ActivityAction.CREATED, user);
       return exercise;
     } catch (error) {
-      if (queryRunner.isTransactionActive) {
-        await queryRunner.rollbackTransaction();
-      }
       if (imageUrl) this.emitImageOrphaned(imageUrl);
       this.handleDBExceptions(error);
-    } finally {
-      await queryRunner.release();
     }
   }
 
@@ -183,27 +165,14 @@ export class ExercisesService {
     if (!exercise)
       throw new NotFoundException(`Exercise with id: ${id} not found`);
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-
     try {
-      await queryRunner.startTransaction();
-
-      await queryRunner.manager.save(exercise);
-
-      if (updateExerciseDto.weight !== undefined) {
-        await this.recordWeightHistory(exercise, queryRunner.manager);
-      }
-
-      await queryRunner.commitTransaction();
+      await this.exerciseWeightRepository.updateExercise(
+        exercise,
+        updateExerciseDto.weight !== undefined,
+      );
     } catch (error) {
-      if (queryRunner.isTransactionActive) {
-        await queryRunner.rollbackTransaction();
-      }
       if (newImageUrl) this.emitImageOrphaned(newImageUrl);
       this.handleDBExceptions(error);
-    } finally {
-      await queryRunner.release();
     }
 
     this.emitActivityRecorded(exercise, ActivityAction.UPDATED, user);
@@ -231,25 +200,6 @@ export class ExercisesService {
     throw new InternalServerErrorException(
       'Unexpected error, check server logs',
     );
-  }
-
-  private async recordWeightHistory(
-    exercise: Exercise,
-    manager?: EntityManager,
-  ) {
-    const repository = manager
-      ? manager.getRepository(WeightHistory)
-      : this.weightHistoryRepository;
-
-    const entry = repository.create({
-      weightGrams: exercise.weightGrams,
-      weightUnit: exercise.weightUnit,
-      note: null,
-      date: new Date(),
-      exercise,
-    });
-
-    await repository.save(entry);
   }
 
   private buildImageKey(image: Express.Multer.File) {

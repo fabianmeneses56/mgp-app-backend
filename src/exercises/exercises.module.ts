@@ -4,24 +4,24 @@ import { ExercisesService } from './exercises.service';
 import { ExercisesController } from './exercises.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Exercise } from './entities/exercise.entity';
-import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
 import { AuthModule } from 'src/auth/auth.module';
 import { CategoriesModule } from 'src/categories/categories.module';
 import { ExerciseImageListener } from './listeners/exercise-image.listener';
-import { ExerciseWeightProjectionListener } from './listeners/exercise-weight-projection.listener';
+import { ExerciseWeightRepository } from './exercise-weight.repository';
 
 @Module({
   controllers: [ExercisesController],
   providers: [
     ExercisesService,
     ExerciseImageListener,
-    ExerciseWeightProjectionListener,
+    ExerciseWeightRepository,
   ],
   imports: [
-    TypeOrmModule.forFeature([Exercise, WeightHistory]),
+    TypeOrmModule.forFeature([Exercise]),
     AuthModule,
     ConfigModule,
     CategoriesModule,
   ],
+  exports: [ExerciseWeightRepository],
 })
 export class ExercisesModule {}

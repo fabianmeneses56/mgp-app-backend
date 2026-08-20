@@ -10,13 +10,10 @@ import { isUUID } from 'class-validator';
 import { User } from 'src/auth/entities/user.entity';
 import { convertWeightToGrams } from 'src/exercises/utils/convert-weight';
 import { Exercise } from 'src/exercises/entities/exercise.entity';
+import { ExerciseWeightRepository } from 'src/exercises/exercise-weight.repository';
 import { WeightHistory } from './entities/weight-history.entity';
 import { CreateWeightHistoryDto } from './dto/create-weight-history.dto';
 import { UpdateWeightHistoryDto } from './dto/update-weight-history.dto';
-import {
-  WEIGHT_HISTORY_LATEST_CHANGED,
-  WeightHistoryLatestChangedEvent,
-} from './events/weight-history-latest-changed.event';
 import {
   ActivityAction,
   ActivityType,
@@ -37,6 +34,8 @@ export class WeightHistoryService {
     @InjectRepository(Exercise)
     private readonly exerciseRepository: Repository<Exercise>,
 
+    private readonly exerciseWeightRepository: ExerciseWeightRepository,
+
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -47,17 +46,14 @@ export class WeightHistoryService {
   ): Promise<WeightHistory> {
     const exercise = await this.getOwnedExercise(exerciseId, user);
 
-    const entry = this.weightHistoryRepository.create({
+    const entry = await this.exerciseWeightRepository.appendEntry(exerciseId, {
       weightGrams: convertWeightToGrams(dto.weight, dto.weightUnit),
       weightUnit: dto.weightUnit,
       note: dto.note ?? null,
       date: new Date(dto.date),
       exercise,
     });
-
-    await this.weightHistoryRepository.save(entry);
     this.emitActivityRecorded(entry, exercise, ActivityAction.CREATED, user);
-    await this.publishLatestWeight(exerciseId);
 
     return entry;
   }
@@ -90,9 +86,8 @@ export class WeightHistoryService {
     if (dto.note !== undefined) entry.note = dto.note;
     if (dto.date !== undefined) entry.date = new Date(dto.date);
 
-    await this.weightHistoryRepository.save(entry);
+    await this.exerciseWeightRepository.updateEntry(entry, exerciseId);
     this.emitActivityRecorded(entry, exercise, ActivityAction.UPDATED, user);
-    await this.publishLatestWeight(exerciseId);
 
     return entry;
   }
@@ -105,30 +100,9 @@ export class WeightHistoryService {
     await this.getOwnedExercise(exerciseId, user);
     const entry = await this.getEntryForExercise(entryId, exerciseId);
 
-    await this.weightHistoryRepository.remove(entry);
-    await this.publishLatestWeight(exerciseId);
+    await this.exerciseWeightRepository.removeEntry(entry, exerciseId);
 
     return entry;
-  }
-
-  private async publishLatestWeight(exerciseId: string): Promise<void> {
-    const latest = await this.weightHistoryRepository.findOne({
-      where: { exercise: { id: exerciseId } },
-      order: { date: 'DESC' },
-    });
-
-    if (!latest) return;
-
-    // emitAsync (no emit): los listeners se esperan y sus errores se propagan,
-    // así que la respuesta no confirma un cambio que quedó a medias.
-    await this.eventEmitter.emitAsync(
-      WEIGHT_HISTORY_LATEST_CHANGED,
-      new WeightHistoryLatestChangedEvent(
-        exerciseId,
-        latest.weightGrams,
-        latest.weightUnit,
-      ),
-    );
   }
 
   private emitActivityRecorded(

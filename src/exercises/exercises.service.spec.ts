@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
   InternalServerErrorException,
@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
 import { Exercise } from './entities/exercise.entity';
-import { WeightHistory } from 'src/weight-history/entities/weight-history.entity';
+import { ExerciseWeightRepository } from './exercise-weight.repository';
 import { WeightUnit } from './enums/weight-unit.enum';
 import { CategoriesService } from 'src/categories/categories.service';
 import { CloudflareR2Service } from 'src/cloudflare-r2/cloudflare-r2.service';
@@ -36,9 +36,9 @@ describe('ExercisesService', () => {
     remove: jest.fn(),
   };
 
-  const weightHistoryRepository = {
-    create: jest.fn(),
-    save: jest.fn(),
+  const exerciseWeightRepository = {
+    createExercise: jest.fn(),
+    updateExercise: jest.fn(),
   };
 
   const categoriesService = {
@@ -60,54 +60,23 @@ describe('ExercisesService', () => {
       new ExerciseImageOrphanedEvent(imageUrl),
     );
 
-  const historyRepositoryInTx = {
-    create: jest.fn(),
-    save: jest.fn(),
-  };
-
-  const manager = {
-    create: jest.fn(),
-    save: jest.fn(),
-    getRepository: jest.fn(),
-  };
-
-  const queryRunner = {
-    connect: jest.fn(),
-    startTransaction: jest.fn(),
-    commitTransaction: jest.fn(),
-    rollbackTransaction: jest.fn(),
-    release: jest.fn(),
-    isTransactionActive: false,
-    manager,
-  };
-
-  const dataSource = {
-    createQueryRunner: jest.fn(() => queryRunner),
-  };
-
   const user = { id: 'f4b1a2c3-1111-4a11-8b11-abcdef123456' } as User;
   const category = { id: 'cat-id' } as Category;
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    queryRunner.isTransactionActive = false;
-    queryRunner.startTransaction.mockImplementation(() => {
-      queryRunner.isTransactionActive = true;
-    });
-    manager.getRepository.mockReturnValue(historyRepositoryInTx);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ExercisesService,
         { provide: getRepositoryToken(Exercise), useValue: exerciseRepository },
         {
-          provide: getRepositoryToken(WeightHistory),
-          useValue: weightHistoryRepository,
+          provide: ExerciseWeightRepository,
+          useValue: exerciseWeightRepository,
         },
         { provide: CategoriesService, useValue: categoriesService },
         { provide: CloudflareR2Service, useValue: cloudflareR2Service },
         { provide: EventEmitter2, useValue: eventEmitter },
-        { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
 
@@ -124,51 +93,38 @@ describe('ExercisesService', () => {
 
     beforeEach(() => {
       categoriesService.findOneByUser.mockResolvedValue(category);
-      manager.create.mockImplementation(
-        (_entity: unknown, data: Partial<Exercise>) => ({ ...data }),
+      exerciseWeightRepository.createExercise.mockImplementation(
+        (data: Record<string, unknown>) =>
+          Promise.resolve({ id: 'new-id', ...data }),
       );
-      manager.save.mockResolvedValue(undefined);
-      historyRepositoryInTx.create.mockImplementation(
-        (data: Partial<WeightHistory>) => ({ ...data }),
-      );
-      historyRepositoryInTx.save.mockResolvedValue(undefined);
     });
 
-    it('without an image: resolves the category via categoriesService.findOneByUser, converts the weight, commits the transaction and records a WeightHistory entry with the same transaction manager', async () => {
+    it('without an image: resolves the category via categoriesService.findOneByUser, converts the weight and delegates to exerciseWeightRepository.createExercise', async () => {
       const result = await service.create(dto as any, user);
 
       expect(categoriesService.findOneByUser).toHaveBeenCalledWith(
         dto.category,
         user,
       );
-      expect(manager.create).toHaveBeenCalledWith(Exercise, {
+      expect(exerciseWeightRepository.createExercise).toHaveBeenCalledWith({
         name: dto.name,
         weightGrams: 60000,
         weightUnit: WeightUnit.KILOGRAM,
         imageUrl: null,
         category,
       });
-      expect(queryRunner.commitTransaction).toHaveBeenCalled();
-      expect(manager.getRepository).toHaveBeenCalledWith(WeightHistory);
-      expect(historyRepositoryInTx.create).toHaveBeenCalledWith({
-        weightGrams: 60000,
-        weightUnit: WeightUnit.KILOGRAM,
-        note: null,
-        date: expect.any(Date) as Date,
-        exercise: result,
-      });
-      expect(historyRepositoryInTx.save).toHaveBeenCalled();
-      expect(weightHistoryRepository.create).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        name: dto.name,
-        weightGrams: 60000,
-        weightUnit: WeightUnit.KILOGRAM,
-        imageUrl: null,
-        category,
-      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          name: dto.name,
+          weightGrams: 60000,
+          weightUnit: WeightUnit.KILOGRAM,
+          imageUrl: null,
+          category,
+        }),
+      );
     });
 
-    it('emits ACTIVITY_RECORDED with type EXERCISE and action CREATED after committing', async () => {
+    it('emits ACTIVITY_RECORDED with type EXERCISE and action CREATED after createExercise resolves', async () => {
       const result = await service.create(dto as any, user);
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -200,8 +156,7 @@ describe('ExercisesService', () => {
         image.buffer,
         image.mimetype,
       );
-      expect(manager.create).toHaveBeenCalledWith(
-        Exercise,
+      expect(exerciseWeightRepository.createExercise).toHaveBeenCalledWith(
         expect.objectContaining({
           imageUrl: 'https://public-url/exercises/some-uuid.png',
         }),
@@ -222,10 +177,10 @@ describe('ExercisesService', () => {
         service.create(dto as any, user, image),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(cloudflareR2Service.uploadFile).not.toHaveBeenCalled();
-      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
+      expect(exerciseWeightRepository.createExercise).not.toHaveBeenCalled();
     });
 
-    it('when save fails: rolls back the transaction, emits the orphaned-image event for the uploaded image and throws InternalServerErrorException', async () => {
+    it('when createExercise fails: emits the orphaned-image event for the uploaded image and throws InternalServerErrorException', async () => {
       const image = {
         buffer: Buffer.from('fake'),
         mimetype: 'image/png',
@@ -234,13 +189,14 @@ describe('ExercisesService', () => {
       cloudflareR2Service.uploadFile.mockResolvedValue(
         'https://public-url/exercises/some-uuid.png',
       );
-      manager.save.mockRejectedValue(new Error('db down'));
+      exerciseWeightRepository.createExercise.mockRejectedValue(
+        new Error('db down'),
+      );
 
       await expect(
         service.create(dto as any, user, image),
       ).rejects.toBeInstanceOf(InternalServerErrorException);
 
-      expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
       expectOrphanedEmit('https://public-url/exercises/some-uuid.png');
       expect(eventEmitter.emit).not.toHaveBeenCalledWith(
         ACTIVITY_RECORDED,
@@ -249,32 +205,15 @@ describe('ExercisesService', () => {
     });
 
     it('throws BadRequestException on a unique-violation error (code 23505) and does not emit activity', async () => {
-      manager.save.mockRejectedValue({ code: '23505', detail: 'dup' });
+      exerciseWeightRepository.createExercise.mockRejectedValue({
+        code: '23505',
+        detail: 'dup',
+      });
 
       await expect(service.create(dto as any, user)).rejects.toBeInstanceOf(
         BadRequestException,
       );
       expect(eventEmitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('calls queryRunner.release() on both the happy path and the error path', async () => {
-      await service.create(dto as any, user);
-      expect(queryRunner.release).toHaveBeenCalledTimes(1);
-
-      jest.clearAllMocks();
-      queryRunner.isTransactionActive = false;
-      queryRunner.startTransaction.mockImplementation(() => {
-        queryRunner.isTransactionActive = true;
-      });
-      manager.getRepository.mockReturnValue(historyRepositoryInTx);
-      categoriesService.findOneByUser.mockResolvedValue(category);
-      manager.create.mockImplementation(
-        (_entity: unknown, data: Partial<Exercise>) => ({ ...data }),
-      );
-      manager.save.mockRejectedValue(new Error('db down'));
-
-      await expect(service.create(dto as any, user)).rejects.toThrow();
-      expect(queryRunner.release).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -329,11 +268,7 @@ describe('ExercisesService', () => {
       exerciseRepository.preload.mockImplementation(
         (data: Partial<Exercise>) => ({ ...data }),
       );
-      manager.save.mockResolvedValue(undefined);
-      historyRepositoryInTx.create.mockImplementation(
-        (data: Partial<WeightHistory>) => ({ ...data }),
-      );
-      historyRepositoryInTx.save.mockResolvedValue(undefined);
+      exerciseWeightRepository.updateExercise.mockResolvedValue(undefined);
     });
 
     it('throws BadRequestException when weightUnit is provided without weight', async () => {
@@ -343,19 +278,22 @@ describe('ExercisesService', () => {
       expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
-    it('does not record a WeightHistory entry when weight is not provided', async () => {
+    it('calls exerciseWeightRepository.updateExercise with recordWeightEntry: false when weight is not provided', async () => {
       await service.update(id, { name: 'New name' } as any, user);
 
-      expect(historyRepositoryInTx.create).not.toHaveBeenCalled();
+      expect(exerciseWeightRepository.updateExercise).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'New name' }),
+        false,
+      );
     });
 
-    it('records a WeightHistory entry when weight is provided', async () => {
+    it('calls exerciseWeightRepository.updateExercise with recordWeightEntry: true when weight is provided', async () => {
       await service.update(id, { weight: 65 } as any, user);
 
-      expect(historyRepositoryInTx.create).toHaveBeenCalledWith(
+      expect(exerciseWeightRepository.updateExercise).toHaveBeenCalledWith(
         expect.objectContaining({ weightGrams: 65000 }),
+        true,
       );
-      expect(historyRepositoryInTx.save).toHaveBeenCalled();
     });
 
     it('emits ACTIVITY_RECORDED with type EXERCISE and action UPDATED with the resultant name', async () => {
@@ -407,7 +345,7 @@ describe('ExercisesService', () => {
       expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
-    it('when save fails: rolls back, emits the orphaned-image event for the new image only and leaves the previous one alone', async () => {
+    it('when updateExercise fails: emits the orphaned-image event for the new image only and leaves the previous one alone', async () => {
       const withPreviousImage = {
         ...currentExercise,
         imageUrl: 'https://public-url/exercises/old-key.png',
@@ -416,7 +354,9 @@ describe('ExercisesService', () => {
       cloudflareR2Service.uploadFile.mockResolvedValue(
         'https://public-url/exercises/new-key.png',
       );
-      manager.save.mockRejectedValue(new Error('db down'));
+      exerciseWeightRepository.updateExercise.mockRejectedValue(
+        new Error('db down'),
+      );
       const image = {
         buffer: Buffer.from('fake'),
         mimetype: 'image/png',
@@ -427,7 +367,6 @@ describe('ExercisesService', () => {
         service.update(id, {} as any, user, image),
       ).rejects.toBeInstanceOf(InternalServerErrorException);
 
-      expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
       expectOrphanedEmit('https://public-url/exercises/new-key.png');
       expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
     });

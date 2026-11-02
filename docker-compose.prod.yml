@@ -38,8 +38,16 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - default
+      # Compartida con stock-tracker (alias stock-api). Crear una vez: docker network create edge
+      - edge
     depends_on:
       - app
+
+networks:
+  edge:
+    external: true
 
 volumes:
   pgdata:

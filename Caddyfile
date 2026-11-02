@@ -1,3 +1,8 @@
 {$DOMAIN} {
 	reverse_proxy app:3000
 }
+
+# API de stock-tracker (otro repo, mismo VPS): llega por la red Docker externa "edge".
+stock.{$DOMAIN} {
+	reverse_proxy stock-api:3000
+}
